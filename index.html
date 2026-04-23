@@ -1,172 +1,90 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="uk">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Greentech Pro Scanner</title>
-    <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
-    <style>
-        body { margin: 0; background: #000; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        #video-container { position: relative; width: 100%; height: 45vh; background: #000; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 140px; border: 2px solid #007bff; border-radius: 15px; box-shadow: 0 0 20px rgba(0,123,255,0.4); pointer-events: none; }
-        
-        .list-panel { flex-grow: 1; background: #121212; padding: 12px; display: flex; flex-direction: column; border-top: 2px solid #333; }
-        .counter { font-size: 18px; font-weight: bold; color: #007bff; text-align: center; margin-bottom: 10px; }
-        #codes-list { flex-grow: 1; overflow-y: auto; background: #000; border-radius: 10px; padding: 5px; border: 1px solid #222; }
-        
-        .code-item { 
-            background: #1c1c1c; margin-bottom: 6px; padding: 12px; border-radius: 8px;
-            display: flex; justify-content: space-between; align-items: center;
-            border-left: 4px solid #007bff; animation: slideIn 0.3s ease;
-        }
-        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
-        
-        .remove-btn { color: #ff4d4d; font-size: 22px; font-weight: bold; padding: 5px 12px; cursor: pointer; }
-        
-        .footer-btns { padding-top: 12px; }
-        #send-btn { 
-            width: 100%; background: #28a745; color: white; border: none; 
-            padding: 18px; border-radius: 12px; font-size: 18px; font-weight: bold; 
-        }
-        #send-btn:disabled { background: #444; color: #888; }
-    </style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Scanner — серійники</title>
+  <style>
+    body{font-family:Arial;margin:16px}
+    #video{width:320px;height:240px;border:1px solid #ccc}
+    #list{margin-top:12px}
+    .item{display:flex;align-items:center;justify-content:space-between;padding:6px;border-bottom:1px solid #eee}
+    .code{font-family:monospace}
+    button{margin-left:8px}
+  </style>
 </head>
 <body>
+  <h3>Сканер штрих/QR кодів</h3>
+  <div>
+    <button id="startBtn">Запустити сканер</button>
+    <button id="stopBtn" disabled>Зупинити</button>
+  </div>
+  <video id="video" muted playsinline></video>
+  <div id="status"></div>
+  <div id="list"></div>
 
-<div id="video-container">
-    <video id="video" playsinline></video>
-    <div class="scan-region"></div>
-</div>
+  <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
+  <script>
+    const codeReader = new ZXing.BrowserMultiFormatReader();
+    const videoElem = document.getElementById('video');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const status = document.getElementById('status');
+    const list = document.getElementById('list');
+    let controls;
 
-<div class="list-panel">
-    <div class="counter">📊 СКАНОВАНО: <span id="count">0</span> шт.</div>
-    <div id="codes-list"></div>
-    
-    <div class="footer-btns">
-        <button id="send-btn" onclick="sendToBot()" disabled>ВІДПРАВИТИ В БОТ (0)</button>
-    </div>
-</div>
-
-<script>
-    const tg = window.Telegram.WebApp;
-    tg.expand();
-
-    const video = document.getElementById('video');
-    const codesList = document.getElementById('codes-list');
-    const countDisplay = document.getElementById('count');
-    const sendBtn = document.getElementById('send-btn');
-    
-    let scannedCodes = [];
-    let throttleTimeout = false;
-
-    function isValidCode(code) {
-        const text = code.trim();
-        
-        // 1. Ігноруємо посилання
-        if (/^(http|https|www|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(text)) return false;
-        
-        // 2. Ігноруємо, якщо в коді ТІЛЬКИ букви (немає жодної цифри)
-        if (!/\d/.test(text)) return false;
-        
-        // 3. Ігноруємо занадто короткі (менше 4 символів)
-        if (text.length < 4) return false;
-
-        return true;
+    function addSerial(serial) {
+      serial = serial.trim();
+      if(!serial) return;
+      // унікальність
+      if(document.querySelector(`[data-code="${CSS.escape(serial)}"]`)) return;
+      const row = document.createElement('div');
+      row.className = 'item';
+      row.dataset.code = serial;
+      row.innerHTML = `<span class="code">${serial}</span><div><button class="del">Видалити</button></div>`;
+      row.querySelector('.del').addEventListener('click', ()=> row.remove());
+      list.prepend(row);
     }
 
-    function addCode(code) {
-        if (throttleTimeout || scannedCodes.includes(code)) return;
-        if (!isValidCode(code)) return;
-
-        scannedCodes.unshift(code);
-        updateUI();
-
-        if (navigator.vibrate) navigator.vibrate(50);
-
-        throttleTimeout = true;
-        setTimeout(() => { throttleTimeout = false; }, 1300);
+    function parseAndAdd(text) {
+      // Роздільники: новий рядок, кома, крапка з комою, пробіл
+      const parts = text.split(/[\r\n,;]+|\s+/).map(s=>s.trim()).filter(Boolean);
+      // Якщо в QR закодовано один рядок з 30 серійниками, parts.length буде 30
+      parts.forEach(addSerial);
+      status.textContent = `Додано ${parts.length} серійників`;
     }
 
-    function removeCode(index) {
-        scannedCodes.splice(index, 1);
-        updateUI();
-    }
-
-    function updateUI() {
-        const len = scannedCodes.length;
-        countDisplay.innerText = len;
-        sendBtn.innerText = `ВІДПРАВИТИ В БОТ (${len})`;
-        sendBtn.disabled = len === 0;
-        
-        if (len === 0) {
-            codesList.innerHTML = "<div style='text-align:center; padding:30px; color:#444;'>Очікування штрих-коду...</div>";
-            return;
-        }
-
-        codesList.innerHTML = scannedCodes.map((code, index) => `
-            <div class="code-item">
-                <span style="font-family: monospace; font-size: 16px;">${code}</span>
-                <span class="remove-btn" onclick="removeCode(${index})">✕</span>
-            </div>
-        `).join("");
-    }
-
-    function sendToBot() {
-        if (scannedCodes.length > 0) {
-            tg.sendData(scannedCodes.join("|"));
-            tg.close();
-        }
-    }
-
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
-        video.srcObject = stream;
-        video.play();
-        requestAnimationFrame(tick);
+    startBtn.addEventListener('click', async () => {
+      startBtn.disabled = true;
+      status.textContent = 'Запит доступу до камери...';
+      try {
+        const devices = await codeReader.listVideoInputDevices();
+        const deviceId = devices.length ? devices[0].deviceId : undefined;
+        controls = await codeReader.decodeFromVideoDevice(deviceId, videoElem, (result, err) => {
+          if (result) {
+            // Результат текстовий
+            parseAndAdd(result.getText());
+          }
+          if (err && !(err instanceof ZXing.NotFoundException)) {
+            console.error(err);
+          }
+        });
+        stopBtn.disabled = false;
+        status.textContent = 'Сканер запущено';
+      } catch (e) {
+        console.error(e);
+        status.textContent = 'Помилка доступу до камери: ' + e.message;
+        startBtn.disabled = false;
+      }
     });
 
-    function tick() {
-        if (video.readyState === video.HAVE_ENOUGH_DATA && !throttleTimeout) {
-            const canvasElement = document.createElement("canvas");
-            const canvas = canvasElement.getContext("2d");
-            canvasElement.height = video.videoHeight;
-            canvasElement.width = video.videoWidth;
-            canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
-
-            // QR Scan (jsQR)
-            const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
-            if (qrCode) {
-                addCode(qrCode.data);
-            } else {
-                // Barcode Scan (Quagga) - Максимальний набір форматів
-                Quagga.decodeSingle({
-                    src: canvasElement.toDataURL(),
-                    decoder: { 
-                        readers: [
-                            "code_128_reader", 
-                            "ean_reader", 
-                            "ean_8_reader", 
-                            "code_39_reader", 
-                            "code_39_vin_reader", 
-                            "codabar_reader", 
-                            "upc_reader", 
-                            "upc_e_reader", 
-                            "i2of5_reader"
-                        ] 
-                    },
-                    locate: true
-                }, (result) => {
-                    if (result && result.codeResult) addCode(result.codeResult.code);
-                });
-            }
-        }
-        requestAnimationFrame(tick);
-    }
-    
-    updateUI();
-</script>
+    stopBtn.addEventListener('click', () => {
+      codeReader.reset();
+      videoElem.srcObject = null;
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+      status.textContent = 'Сканер зупинено';
+    });
+  </script>
 </body>
 </html>
