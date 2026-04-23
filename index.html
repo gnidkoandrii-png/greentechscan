@@ -5,19 +5,17 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/html5-qrcode"></script>
+    <!-- ✅ ЗАФІКСОВАНА ВЕРСІЯ: більше не буде "само поламалось" при оновленні бібліотеки -->
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
         body { background: #18222d; color: white; text-align: center; margin: 0; padding: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        
-        /* Блок камери з плавною зміною кольору для помилки */
+
         #reader { width: 100%; flex-grow: 1; background: #000; box-sizing: border-box; border-bottom: 3px solid #2ea6ff; transition: border 0.2s, box-shadow 0.2s; }
-        
-        /* Клас, який додає червону рамку при дублікаті */
+
         .error-flash { border: 6px solid #ff3b30 !important; box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.8); }
 
         .stats { padding: 15px; height: 120px; display: flex; flex-direction: column; justify-content: center; background: #18222d; }
-        
-        /* Кнопка піднята вище, щоб обійти рекламу tiiny.host */
+
         .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 90%; margin: 0 auto 60px auto; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000;}
     </style>
 </head>
@@ -33,8 +31,8 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
         let scannedCodes = new Set();
-        let lastErrorTime = 0; // Запобіжник для спаму помилками
-        
+        let lastErrorTime = 0;
+
         // --- ГЕНЕРАТОР ЗВУКІВ ---
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioContext();
@@ -45,17 +43,17 @@
             const gainNode = audioCtx.createGain();
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
-            
+
             if (type === 'success') {
                 oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); // Високий пік
+                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime);
                 gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
                 oscillator.start(audioCtx.currentTime);
                 oscillator.stop(audioCtx.currentTime + 0.1);
             } else if (type === 'error') {
                 oscillator.type = 'sawtooth';
-                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime); // Низький звук
+                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
                 gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
                 oscillator.start(audioCtx.currentTime);
@@ -64,14 +62,41 @@
         }
         // -----------------------
 
-        const html5QrCode = new Html5Qrcode("reader");
-        const config = { 
-            fps: 15, 
-            qrbox: function(vw, vh) { return { width: vw * 0.85, height: Math.min(vh * 0.4, 300) }; }
+        // ✅ ЯВНО вказуємо формати, які використовує склад.
+        // Без цього бібліотека намагається розпізнати ВСІ формати одразу і сильно втрачає точність.
+        const formatsToSupport = [
+            Html5QrcodeSupportedFormats.QR_CODE,
+            Html5QrcodeSupportedFormats.EAN_13,
+            Html5QrcodeSupportedFormats.EAN_8,
+            Html5QrcodeSupportedFormats.CODE_128,
+            Html5QrcodeSupportedFormats.CODE_39,
+            Html5QrcodeSupportedFormats.CODE_93,
+            Html5QrcodeSupportedFormats.UPC_A,
+            Html5QrcodeSupportedFormats.UPC_E,
+            Html5QrcodeSupportedFormats.ITF,
+            Html5QrcodeSupportedFormats.DATA_MATRIX
+        ];
+
+        const html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formatsToSupport });
+
+        const config = {
+            fps: 10, // ✅ 10 краще за 15: менше змазаних кадрів, стабільніше на слабших телефонах
+            qrbox: function(vw, vh) { return { width: vw * 0.85, height: Math.min(vh * 0.4, 300) }; },
+            // ✅ Просимо максимально якісне відео — без цього браузер може дати 640×480,
+            // і дрібні EAN-13 просто не зчитуються.
+            videoConstraints: {
+                facingMode: { ideal: "environment" },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 },
+                advanced: [{ focusMode: "continuous" }] // безперервний автофокус
+            },
+            // ✅ Використовуємо нативний BarcodeDetector там, де він є (Android Chrome) — швидше й точніше
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+            rememberLastUsedCamera: true
         };
 
         html5QrCode.start(
-            { facingMode: "environment" }, 
+            { facingMode: { ideal: "environment" } },
             config,
             (decodedText) => {
                 let serials = decodedText.split(/\s+/);
@@ -96,31 +121,28 @@
 
                 let now = Date.now();
 
-                // ЯКЩО ДОДАНО НОВИЙ КОД:
                 if (addedAny) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                    
+
                     document.getElementById('count-text').innerText = "Відскановано: " + scannedCodes.size;
-                    
+
                     if (serials.length > 1) {
                         document.getElementById('last-code').innerText = "📦 Додано пакетом";
                     } else {
                         let lastValid = Array.from(scannedCodes).pop();
                         document.getElementById('last-code').innerText = "Останній: " + lastValid;
                     }
-                    
+
                     document.getElementById('send-btn').style.display = "block";
-                } 
-                // ЯКЩО КОД ВЖЕ БУВ (і пройшло більше 2 секунд з попереднього сигналу помилки)
+                }
                 else if (hasDuplicates && (now - lastErrorTime > 2000)) {
                     lastErrorTime = now;
                     playSound('error');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                    
+
                     document.getElementById('last-code').innerText = "⚠️ ЦЕЙ КОД ВЖЕ ВІДСКАНОВАНО!";
-                    
-                    // Блимаємо червоною рамкою
+
                     let readerDiv = document.getElementById('reader');
                     readerDiv.classList.add('error-flash');
                     setTimeout(() => {
