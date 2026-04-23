@@ -20,10 +20,8 @@
         .code-item { 
             background: #1c1c1c; margin-bottom: 6px; padding: 12px; border-radius: 8px;
             display: flex; justify-content: space-between; align-items: center;
-            border-left: 4px solid #007bff; animation: slideIn 0.3s ease;
+            border-left: 4px solid #007bff;
         }
-        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
-        
         .remove-btn { color: #ff4d4d; font-size: 22px; font-weight: bold; padding: 5px 12px; cursor: pointer; }
         
         .footer-btns { padding-top: 12px; }
@@ -44,7 +42,6 @@
 <div class="list-panel">
     <div class="counter">📊 СКАНОВАНО: <span id="count">0</span> шт.</div>
     <div id="codes-list"></div>
-    
     <div class="footer-btns">
         <button id="send-btn" onclick="sendToBot()" disabled>ВІДПРАВИТИ В БОТ (0)</button>
     </div>
@@ -62,18 +59,12 @@
     let scannedCodes = [];
     let throttleTimeout = false;
 
+    // Розумний фільтр
     function isValidCode(code) {
         const text = code.trim();
-        
-        // 1. Ігноруємо посилання
-        if (/^(http|https|www|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(text)) return false;
-        
-        // 2. Ігноруємо, якщо в коді ТІЛЬКИ букви (немає жодної цифри)
-        if (!/\d/.test(text)) return false;
-        
-        // 3. Ігноруємо занадто короткі (менше 4 символів)
-        if (text.length < 4) return false;
-
+        if (/^(http|https|www)/i.test(text)) return false; // Ігноруємо посилання
+        if (!/\d/.test(text)) return false; // Тільки якщо є хоча б одна цифра
+        if (text.length < 4) return false; // Не беремо занадто короткі
         return true;
     }
 
@@ -85,7 +76,6 @@
         updateUI();
 
         if (navigator.vibrate) navigator.vibrate(50);
-
         throttleTimeout = true;
         setTimeout(() => { throttleTimeout = false; }, 1300);
     }
@@ -102,23 +92,21 @@
         sendBtn.disabled = len === 0;
         
         if (len === 0) {
-            codesList.innerHTML = "<div style='text-align:center; padding:30px; color:#444;'>Очікування штрих-коду...</div>";
+            codesList.innerHTML = "<div style='text-align:center; padding:30px; color:#444;'>Очікування...</div>";
             return;
         }
 
         codesList.innerHTML = scannedCodes.map((code, index) => `
             <div class="code-item">
-                <span style="font-family: monospace; font-size: 16px;">${code}</span>
+                <span style="font-family: monospace;">${code}</span>
                 <span class="remove-btn" onclick="removeCode(${index})">✕</span>
             </div>
         `).join("");
     }
 
     function sendToBot() {
-        if (scannedCodes.length > 0) {
-            tg.sendData(scannedCodes.join("|"));
-            tg.close();
-        }
+        tg.sendData(scannedCodes.join("|"));
+        tg.close();
     }
 
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
@@ -136,27 +124,13 @@
             canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
             const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
 
-            // QR Scan (jsQR)
             const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
             if (qrCode) {
                 addCode(qrCode.data);
             } else {
-                // Barcode Scan (Quagga) - Максимальний набір форматів
                 Quagga.decodeSingle({
                     src: canvasElement.toDataURL(),
-                    decoder: { 
-                        readers: [
-                            "code_128_reader", 
-                            "ean_reader", 
-                            "ean_8_reader", 
-                            "code_39_reader", 
-                            "code_39_vin_reader", 
-                            "codabar_reader", 
-                            "upc_reader", 
-                            "upc_e_reader", 
-                            "i2of5_reader"
-                        ] 
-                    },
+                    decoder: { readers: ["code_128_reader", "ean_reader", "code_39_reader"] },
                     locate: true
                 }, (result) => {
                     if (result && result.codeResult) addCode(result.codeResult.code);
@@ -165,7 +139,6 @@
         }
         requestAnimationFrame(tick);
     }
-    
     updateUI();
 </script>
 </body>
