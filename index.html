@@ -27,32 +27,21 @@
             flex-direction: column;
         }
 
-        /* Камера: тільки рамка і фон. НЕ чіпаємо жорстко елементи всередині,
-           бо на Android це ламає рендер відео */
+        /* ------------ iOS: html5-qrcode в div#reader ------------ */
         #reader {
-            width: 100% !important;
-            background: #000 !important;
-            border: 0 !important;
-            border-bottom: 3px solid #2ea6ff !important;
-            padding: 0 !important;
-            position: relative !important;
-            overflow: hidden !important;
+            width: 100%;
+            background: #000;
+            border-bottom: 3px solid #2ea6ff;
+            position: relative;
+            overflow: hidden;
             flex-shrink: 0;
+            display: none; /* за замовчуванням — ховаємо; показуємо лише на iOS */
         }
 
-        /* Сховати службові елементи бібліотеки */
-        #reader__dashboard,
-        #reader__dashboard_section,
-        #reader__dashboard_section_csr,
-        #reader__dashboard_section_swaplink,
-        #reader__header_message,
-        #reader__status_span,
-        #reader__filescan_input,
-        #reader__camera_permission_button {
-            display: none !important;
+        body.is-ios #reader {
+            display: block;
         }
 
-        /* iOS-специфічний клас — тільки коли обов'язково потрібно стримати fullscreen */
         body.is-ios #reader video,
         body.is-ios #reader canvas,
         body.is-ios #reader img {
@@ -64,10 +53,48 @@
             left: 0 !important;
         }
 
-        /* Android: мінімум втручання — нехай бібліотека сама керує video */
-        body.is-android #reader video {
-            max-width: 100% !important;
-            max-height: 100% !important;
+        body.is-ios #reader__dashboard,
+        body.is-ios #reader__dashboard_section,
+        body.is-ios #reader__header_message,
+        body.is-ios #reader__status_span,
+        body.is-ios #reader__filescan_input,
+        body.is-ios #reader__camera_permission_button {
+            display: none !important;
+        }
+
+        /* ------------ Android / інше: власний <video> ------------ */
+        #native-cam {
+            width: 100%;
+            background: #000;
+            border-bottom: 3px solid #2ea6ff;
+            position: relative;
+            overflow: hidden;
+            flex-shrink: 0;
+            display: none;
+        }
+        body:not(.is-ios) #native-cam {
+            display: block;
+        }
+
+        #native-video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            display: block;
+        }
+
+        /* Рамка сканування поверх відео */
+        .scan-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            height: 55%;
+            border: 3px solid rgba(255,255,255,0.85);
+            border-radius: 12px;
+            pointer-events: none;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.25);
         }
 
         .error-flash {
@@ -75,6 +102,7 @@
             border-bottom: 6px solid #ff3b30 !important;
         }
 
+        /* ------------ Інше UI ------------ */
         .stats {
             padding: 8px 15px;
             background: #18222d;
@@ -141,7 +169,14 @@
     </style>
 </head>
 <body>
+    <!-- iOS: html5-qrcode рендерить сюди -->
     <div id="reader"></div>
+
+    <!-- Android / все інше: власний плеєр + BarcodeDetector -->
+    <div id="native-cam">
+        <video id="native-video" autoplay playsinline muted></video>
+        <div class="scan-frame"></div>
+    </div>
 
     <div class="stats">
         <h2 id="count-text">Відскановано: 0</h2>
@@ -158,7 +193,7 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
 
-        // --- ДЕТЕКЦІЯ ПЛАТФОРМИ ---
+        // --- ПЛАТФОРМА ---
         const ua = navigator.userAgent || '';
         const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
         const isAndroid = /Android/i.test(ua);
@@ -170,9 +205,15 @@
             const cameraHeight = Math.round(vh * 0.50);
 
             const reader = document.getElementById('reader');
+            const nativeCam = document.getElementById('native-cam');
+
             reader.style.height = cameraHeight + 'px';
             reader.style.maxHeight = cameraHeight + 'px';
             reader.style.minHeight = cameraHeight + 'px';
+
+            nativeCam.style.height = cameraHeight + 'px';
+            nativeCam.style.maxHeight = cameraHeight + 'px';
+            nativeCam.style.minHeight = cameraHeight + 'px';
 
             document.body.style.height = vh + 'px';
         }
@@ -182,20 +223,7 @@
         window.addEventListener('resize', updateLayout);
         window.addEventListener('orientationchange', () => setTimeout(updateLayout, 300));
 
-        // MutationObserver тільки на iOS — на Android не треба, бо бібліотека сама керує розміром
-        if (isIOS) {
-            const reader = document.getElementById('reader');
-            const observer = new MutationObserver(() => {
-                const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
-                const cameraHeight = Math.round(vh * 0.50);
-                if (reader.offsetHeight !== cameraHeight) {
-                    reader.style.height = cameraHeight + 'px';
-                }
-            });
-            observer.observe(reader, { attributes: true, attributeFilter: ['style'] });
-        }
-
-        // --- СКАНУВАННЯ ---
+        // --- СТАН ---
         let scannedList = [];
         let scannedSet = new Set();
         let lastErrorTime = 0;
@@ -230,16 +258,15 @@
             return false;
         }
 
+        // --- ЗВУКИ ---
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioContext();
-
         function playSound(type) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
             const oscillator = audioCtx.createOscillator();
             const gainNode = audioCtx.createGain();
             oscillator.connect(gainNode);
             gainNode.connect(audioCtx.destination);
-
             if (type === 'success') {
                 oscillator.type = 'sine';
                 oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime);
@@ -257,6 +284,7 @@
             }
         }
 
+        // --- СПИСОК ---
         function renderList() {
             const listDiv = document.getElementById('codes-list');
             if (scannedList.length === 0) {
@@ -302,125 +330,231 @@
             });
         }
 
-        const formatsToSupport = [
-            Html5QrcodeSupportedFormats.QR_CODE,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.CODE_93,
-            Html5QrcodeSupportedFormats.UPC_A,
-            Html5QrcodeSupportedFormats.UPC_E,
-            Html5QrcodeSupportedFormats.ITF,
-            Html5QrcodeSupportedFormats.DATA_MATRIX,
-            Html5QrcodeSupportedFormats.PDF_417,
-            Html5QrcodeSupportedFormats.AZTEC,
-            Html5QrcodeSupportedFormats.CODABAR
-        ];
+        // --- ОБРОБКА ВІДСКАНОВАНИХ ДАНИХ (спільна для обох движків) ---
+        function handleScanResult(decodedText) {
+            let tokens = decodedText.split(/[\s,;]+/);
+            let addedCount = 0;
+            let duplicateNormCodes = [];
+            let allWereLinks = tokens.every(t => {
+                const tt = t.trim();
+                return tt && isUnwantedToken(tt);
+            });
 
-        const html5QrCode = new Html5Qrcode("reader", {
-            formatsToSupport: formatsToSupport,
-            verbose: false
-        });
+            tokens.forEach(sn => {
+                sn = sn.trim();
+                if (isUnwantedToken(sn)) return;
+                const norm = normalize(sn);
+                if (!scannedSet.has(norm)) {
+                    scannedSet.add(norm);
+                    scannedList.push(sn);
+                    addedCount++;
+                } else {
+                    duplicateNormCodes.push(norm);
+                }
+            });
 
-        // --- КОНФІГ ПО ПЛАТФОРМАХ ---
-        // Android має нативний BarcodeDetector і працює добре з ним.
-        // iOS — ні, там кращий ZXing всередині бібліотеки.
-        const config = {
-            fps: isAndroid ? 10 : 15,
-            qrbox: function(vw, vh) {
-                return {
-                    width: Math.floor(vw * 0.95),
-                    height: Math.floor(vh * 0.55)
-                };
-            },
-            aspectRatio: 1.7777,
-            videoConstraints: {
-                facingMode: { ideal: "environment" },
-                width: { min: 1280, ideal: 1920 },
-                height: { min: 720, ideal: 1080 },
-                // focusMode підтримують не всі пристрої — кладемо в advanced
-                // щоб відсутність не зламала getUserMedia
-                advanced: [{ focusMode: "continuous" }]
-            },
-            experimentalFeatures: {
-                // На Android ВМИКАЄМО нативний детектор — він швидший і точніший
-                // На iOS ВИМИКАЄМО — там він глючить у Telegram WebApp
-                useBarCodeDetectorIfSupported: isAndroid
-            },
-            disableFlip: true
-        };
+            let now = Date.now();
 
-        html5QrCode.start(
-            { facingMode: { ideal: "environment" } },
-            config,
-            (decodedText) => {
-                let tokens = decodedText.split(/[\s,;]+/);
+            if (addedCount > 0) {
+                playSound('success');
+                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+                document.getElementById('count-text').innerText = "Відскановано: " + scannedList.length;
+                if (addedCount > 1) {
+                    document.getElementById('last-code').innerText = `📦 Додано ${addedCount} шт. пакетом`;
+                } else {
+                    document.getElementById('last-code').innerText = "✅ " + scannedList[scannedList.length - 1];
+                }
+                renderList();
+                return;
+            }
 
-                let addedCount = 0;
-                let duplicateNormCodes = [];
-                let allWereLinks = tokens.every(t => {
-                    const tt = t.trim();
-                    return tt && isUnwantedToken(tt);
-                });
-
-                tokens.forEach(sn => {
-                    sn = sn.trim();
-                    if (isUnwantedToken(sn)) return;
-
-                    const norm = normalize(sn);
-                    if (!scannedSet.has(norm)) {
-                        scannedSet.add(norm);
-                        scannedList.push(sn);
-                        addedCount++;
-                    } else {
-                        duplicateNormCodes.push(norm);
-                    }
-                });
-
-                let now = Date.now();
-
-                if (addedCount > 0) {
-                    playSound('success');
-                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-
-                    document.getElementById('count-text').innerText = "Відскановано: " + scannedList.length;
-
-                    if (addedCount > 1) {
-                        document.getElementById('last-code').innerText = `📦 Додано ${addedCount} шт. пакетом`;
-                    } else {
-                        document.getElementById('last-code').innerText = "✅ " + scannedList[scannedList.length - 1];
-                    }
-                    renderList();
+            if (addedCount === 0 && now - lastErrorTime > 2000) {
+                lastErrorTime = now;
+                if (allWereLinks && tokens.length > 0) {
+                    document.getElementById('last-code').innerText = "🔗 Посилання пропущено";
+                    if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
                     return;
                 }
-
-                if (addedCount === 0 && now - lastErrorTime > 2000) {
-                    lastErrorTime = now;
-
-                    if (allWereLinks && tokens.length > 0) {
-                        document.getElementById('last-code').innerText = "🔗 Посилання пропущено";
-                        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-                        return;
-                    }
-
-                    if (duplicateNormCodes.length > 0) {
-                        playSound('error');
-                        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                        document.getElementById('last-code').innerText = "⚠️ Вже є у списку";
-
-                        let readerDiv = document.getElementById('reader');
-                        readerDiv.classList.add('error-flash');
-                        setTimeout(() => readerDiv.classList.remove('error-flash'), 500);
-
-                        flashDuplicate(duplicateNormCodes[0]);
-                    }
+                if (duplicateNormCodes.length > 0) {
+                    playSound('error');
+                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+                    document.getElementById('last-code').innerText = "⚠️ Вже є у списку";
+                    let camDiv = isIOS ? document.getElementById('reader') : document.getElementById('native-cam');
+                    camDiv.classList.add('error-flash');
+                    setTimeout(() => camDiv.classList.remove('error-flash'), 500);
+                    flashDuplicate(duplicateNormCodes[0]);
                 }
-            },
-            (errorMessage) => {}
-        ).catch((err) => {
-            document.getElementById('last-code').innerText = "Помилка камери: " + err;
-        });
+            }
+        }
+
+        // ==============================================
+        // iOS шлях — html5-qrcode
+        // ==============================================
+        function startIOS() {
+            const formatsToSupport = [
+                Html5QrcodeSupportedFormats.QR_CODE,
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.CODE_93,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.ITF,
+                Html5QrcodeSupportedFormats.DATA_MATRIX,
+                Html5QrcodeSupportedFormats.PDF_417,
+                Html5QrcodeSupportedFormats.AZTEC,
+                Html5QrcodeSupportedFormats.CODABAR
+            ];
+
+            const html5QrCode = new Html5Qrcode("reader", {
+                formatsToSupport: formatsToSupport,
+                verbose: false
+            });
+
+            const config = {
+                fps: 15,
+                qrbox: function(vw, vh) {
+                    return { width: Math.floor(vw * 0.95), height: Math.floor(vh * 0.55) };
+                },
+                aspectRatio: 1.7777,
+                videoConstraints: {
+                    facingMode: { ideal: "environment" },
+                    width: { min: 1280, ideal: 1920 },
+                    height: { min: 720, ideal: 1080 },
+                    advanced: [{ focusMode: "continuous" }]
+                },
+                experimentalFeatures: { useBarCodeDetectorIfSupported: false },
+                disableFlip: true
+            };
+
+            html5QrCode.start(
+                { facingMode: { ideal: "environment" } },
+                config,
+                handleScanResult,
+                () => {}
+            ).catch((err) => {
+                document.getElementById('last-code').innerText = "Помилка камери: " + err;
+            });
+
+            // MutationObserver, щоб стримати fullscreen на iOS
+            const reader = document.getElementById('reader');
+            const observer = new MutationObserver(() => {
+                const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
+                const cameraHeight = Math.round(vh * 0.50);
+                if (reader.offsetHeight !== cameraHeight) {
+                    reader.style.height = cameraHeight + 'px';
+                }
+            });
+            observer.observe(reader, { attributes: true, attributeFilter: ['style'] });
+        }
+
+        // ==============================================
+        // Android / інше — власний video + BarcodeDetector
+        // Fallback: якщо BarcodeDetector відсутній, використовуємо html5-qrcode
+        // ==============================================
+        async function startNative() {
+            const video = document.getElementById('native-video');
+            let stream;
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({
+                    audio: false,
+                    video: {
+                        facingMode: { ideal: "environment" },
+                        width: { ideal: 1920 },
+                        height: { ideal: 1080 }
+                    }
+                });
+            } catch (err) {
+                document.getElementById('last-code').innerText = "Немає доступу до камери: " + err.message;
+                return;
+            }
+
+            video.srcObject = stream;
+            await video.play().catch(() => {});
+
+            // Якщо браузер підтримує нативний BarcodeDetector — чудово
+            if ('BarcodeDetector' in window) {
+                let detector;
+                try {
+                    detector = new BarcodeDetector({
+                        formats: [
+                            'qr_code', 'ean_13', 'ean_8',
+                            'code_128', 'code_39', 'code_93',
+                            'upc_a', 'upc_e', 'itf',
+                            'data_matrix', 'pdf417', 'aztec', 'codabar'
+                        ]
+                    });
+                } catch (e) {
+                    // Якщо конкретні формати не підтримуються — пробуємо без обмеження
+                    detector = new BarcodeDetector();
+                }
+
+                const tick = async () => {
+                    if (video.readyState >= 2) {
+                        try {
+                            const codes = await detector.detect(video);
+                            if (codes && codes.length > 0) {
+                                // Зберемо усі розпізнані значення через перенос рядка,
+                                // щоб handleScanResult міг обробити множинне розпізнавання
+                                const combined = codes.map(c => c.rawValue).join('\n');
+                                handleScanResult(combined);
+                            }
+                        } catch (e) { /* ignore */ }
+                    }
+                    requestAnimationFrame(tick);
+                };
+                requestAnimationFrame(tick);
+                return;
+            }
+
+            // Fallback: старший Android Chrome без BarcodeDetector -> html5-qrcode
+            // Зупиняємо власне відео і віддаємо керування бібліотеці
+            stream.getTracks().forEach(t => t.stop());
+            video.srcObject = null;
+
+            document.getElementById('native-cam').style.display = 'none';
+            const readerEl = document.getElementById('reader');
+            readerEl.style.display = 'block';
+
+            const formatsToSupport = [
+                Html5QrcodeSupportedFormats.QR_CODE,
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.CODE_128,
+                Html5QrcodeSupportedFormats.CODE_39,
+                Html5QrcodeSupportedFormats.CODE_93,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.ITF,
+                Html5QrcodeSupportedFormats.DATA_MATRIX,
+                Html5QrcodeSupportedFormats.PDF_417,
+                Html5QrcodeSupportedFormats.AZTEC,
+                Html5QrcodeSupportedFormats.CODABAR
+            ];
+            const html5QrCode = new Html5Qrcode("reader", { formatsToSupport, verbose: false });
+            html5QrCode.start(
+                { facingMode: { ideal: "environment" } },
+                {
+                    fps: 10,
+                    qrbox: function(vw, vh) { return { width: Math.floor(vw * 0.95), height: Math.floor(vh * 0.55) }; },
+                    videoConstraints: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
+                    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+                    disableFlip: true
+                },
+                handleScanResult,
+                () => {}
+            ).catch((err) => {
+                document.getElementById('last-code').innerText = "Помилка камери: " + err;
+            });
+        }
+
+        // --- СТАРТ ---
+        if (isIOS) {
+            startIOS();
+        } else {
+            startNative();
+        }
 
         setTimeout(updateLayout, 500);
         setTimeout(updateLayout, 1500);
