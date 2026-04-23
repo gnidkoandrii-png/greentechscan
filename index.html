@@ -21,17 +21,15 @@
             color: white;
             text-align: center;
             font-family: sans-serif;
+            position: fixed;
+            inset: 0;
             display: flex;
             flex-direction: column;
         }
 
-        /* КАМЕРА — жорстко зафіксована висота через !important,
-           щоб html5-qrcode не міг перетворити її на fullscreen */
+        /* Блок камери — висота виставляється JS-ом у пікселях */
         #reader {
             width: 100% !important;
-            height: 40vh !important;
-            max-height: 40vh !important;
-            min-height: 40vh !important;
             background: #000 !important;
             border: 0 !important;
             border-bottom: 3px solid #2ea6ff !important;
@@ -41,23 +39,27 @@
             flex-shrink: 0;
         }
 
-        /* Відео та канвас всередині теж мають не вилазити */
+        /* Відео/канвас ОБМЕЖЕНІ рамками #reader */
         #reader video,
         #reader canvas,
         #reader img {
             width: 100% !important;
             height: 100% !important;
-            max-height: 40vh !important;
             object-fit: cover !important;
+            position: absolute !important;
+            top: 0 !important;
+            left: 0 !important;
         }
 
-        /* Прибрати стандартні кнопки бібліотеки (торч, вибір камери), якщо з'являються */
+        /* Приховуємо службові елементи html5-qrcode */
         #reader__dashboard,
         #reader__dashboard_section,
         #reader__dashboard_section_csr,
+        #reader__dashboard_section_swaplink,
         #reader__header_message,
         #reader__status_span,
-        #reader__filescan_input {
+        #reader__filescan_input,
+        #reader__camera_permission_button {
             display: none !important;
         }
 
@@ -66,7 +68,6 @@
             border-bottom: 6px solid #ff3b30 !important;
         }
 
-        /* Лічильник */
         .stats {
             padding: 8px 15px;
             background: #18222d;
@@ -76,7 +77,7 @@
         .stats h2 { color: #4caf50; margin: 0 0 3px 0; font-size: 18px; }
         .stats p { color: #aaa; margin: 0; font-size: 13px; }
 
-        /* Список кодів */
+        /* Список — тільки він скролиться */
         #codes-list {
             flex: 1 1 auto;
             overflow-y: auto;
@@ -126,7 +127,7 @@
         .btn {
             background: #2ea6ff; color: white; border: none;
             padding: 14px; font-size: 17px; border-radius: 10px;
-            width: 92%; margin: 8px auto 50px auto;
+            width: 92%; margin: 8px auto 20px auto;
             display: none; font-weight: bold;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
             flex-shrink: 0;
@@ -151,11 +152,44 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
 
+        // --- ГОЛОВНИЙ ФІКС: розраховуємо висоту камери В ПІКСЕЛЯХ ---
+        // і стежимо за змінами viewport від Telegram
+        function updateLayout() {
+            const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
+            const cameraHeight = Math.round(vh * 0.40); // 40% від видимої висоти
+
+            const reader = document.getElementById('reader');
+            reader.style.height = cameraHeight + 'px';
+            reader.style.maxHeight = cameraHeight + 'px';
+            reader.style.minHeight = cameraHeight + 'px';
+
+            // Body теж жорстко прив'язуємо до висоти viewport
+            document.body.style.height = vh + 'px';
+        }
+
+        updateLayout();
+        // Telegram присилає події, коли меню розгорнулось/згорнулось
+        tg.onEvent('viewportChanged', updateLayout);
+        window.addEventListener('resize', updateLayout);
+        window.addEventListener('orientationchange', () => setTimeout(updateLayout, 300));
+
+        // ПОСТІЙНО стежимо за тим, щоб html5-qrcode не переписала розмір #reader.
+        // Якщо бібліотека задає inline-стиль — повертаємо наш.
+        const reader = document.getElementById('reader');
+        const observer = new MutationObserver(() => {
+            const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
+            const cameraHeight = Math.round(vh * 0.40);
+            if (reader.offsetHeight !== cameraHeight) {
+                reader.style.height = cameraHeight + 'px';
+            }
+        });
+        observer.observe(reader, { attributes: true, attributeFilter: ['style'] });
+
+        // ---------- логіка сканування ----------
         let scannedList = [];
         let scannedSet = new Set();
         let lastErrorTime = 0;
 
-        // --- ЗВУКИ ---
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioContext();
 
@@ -183,16 +217,13 @@
             }
         }
 
-        // --- ОНОВЛЕННЯ СПИСКУ ---
         function renderList() {
             const listDiv = document.getElementById('codes-list');
-
             if (scannedList.length === 0) {
                 listDiv.innerHTML = '<div class="empty-hint">Поки що нічого не відскановано</div>';
                 document.getElementById('send-btn').style.display = 'none';
                 return;
             }
-
             listDiv.innerHTML = '';
             scannedList.forEach((code, idx) => {
                 const item = document.createElement('div');
@@ -205,7 +236,6 @@
                 `;
                 listDiv.appendChild(item);
             });
-
             listDiv.scrollTop = listDiv.scrollHeight;
             document.getElementById('send-btn').style.display = 'block';
         }
@@ -218,8 +248,7 @@
         }
 
         function flashDuplicate(code) {
-            const items = document.querySelectorAll('.code-item');
-            items.forEach(item => {
+            document.querySelectorAll('.code-item').forEach(item => {
                 if (item.dataset.code === code) {
                     item.classList.add('duplicate-flash');
                     item.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -228,7 +257,6 @@
             });
         }
 
-        // --- ФОРМАТИ ---
         const formatsToSupport = [
             Html5QrcodeSupportedFormats.QR_CODE,
             Html5QrcodeSupportedFormats.EAN_13,
@@ -252,10 +280,9 @@
             qrbox: function(vw, vh) {
                 return {
                     width: Math.min(vw * 0.85, 400),
-                    height: Math.min(vh * 0.6, 200)
+                    height: Math.min(vh * 0.6, 180)
                 };
             },
-            aspectRatio: 1.777,
             videoConstraints: {
                 facingMode: { ideal: "environment" },
                 width: { ideal: 1920 },
@@ -295,15 +322,12 @@
                 if (addedCount > 0) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-
                     document.getElementById('count-text').innerText = "Відскановано: " + scannedList.length;
-
                     if (addedCount > 1) {
                         document.getElementById('last-code').innerText = `📦 Додано ${addedCount} шт. пакетом`;
                     } else {
                         document.getElementById('last-code').innerText = "✅ " + scannedList[scannedList.length - 1];
                     }
-
                     renderList();
                 }
 
@@ -311,13 +335,10 @@
                     lastErrorTime = now;
                     playSound('error');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-
                     document.getElementById('last-code').innerText = "⚠️ Вже є: " + duplicateCodes[0];
-
                     let readerDiv = document.getElementById('reader');
                     readerDiv.classList.add('error-flash');
                     setTimeout(() => readerDiv.classList.remove('error-flash'), 500);
-
                     flashDuplicate(duplicateCodes[0]);
                 }
             },
@@ -325,6 +346,12 @@
         ).catch((err) => {
             document.getElementById('last-code').innerText = "Помилка камери: " + err;
         });
+
+        // Після старту камери ще раз виправляємо розмір — бібліотека зазвичай
+        // переписує висоту саме в момент запуску відео
+        setTimeout(updateLayout, 500);
+        setTimeout(updateLayout, 1500);
+        setTimeout(updateLayout, 3000);
 
         function sendData() {
             if (scannedList.length > 0) {
