@@ -149,9 +149,10 @@
         tg.expand();
 
         // --- МАКЕТ ---
+        // ЗМІНЕНО: камера тепер займає 50% екрану (було 40%), щоб довгі штрихкоди Code128 вміщались
         function updateLayout() {
             const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
-            const cameraHeight = Math.round(vh * 0.40);
+            const cameraHeight = Math.round(vh * 0.50);
 
             const reader = document.getElementById('reader');
             reader.style.height = cameraHeight + 'px';
@@ -169,35 +170,28 @@
         const reader = document.getElementById('reader');
         const observer = new MutationObserver(() => {
             const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
-            const cameraHeight = Math.round(vh * 0.40);
+            const cameraHeight = Math.round(vh * 0.50);
             if (reader.offsetHeight !== cameraHeight) {
                 reader.style.height = cameraHeight + 'px';
             }
         });
         observer.observe(reader, { attributes: true, attributeFilter: ['style'] });
 
-        // --- ЛОГІКА СКАНУВАННЯ ---
-        let scannedList = [];      // оригінальні значення (як сканували)
-        let scannedSet = new Set(); // нормалізовані, для перевірки дублів
+        // --- СКАНУВАННЯ ---
+        let scannedList = [];
+        let scannedSet = new Set();
         let lastErrorTime = 0;
 
-        // Нормалізація для порівняння: без пробілів, верхній регістр
         function normalize(code) {
             return code.replace(/\s+/g, '').toUpperCase();
         }
 
-        // Визначає, чи є токен "службовим" (посилання, Wi-Fi, vCard і т.д.)
         function isUnwantedToken(sn) {
             if (!sn) return true;
             if (sn.length < 4) return true;
-
-            // У штрих/серійному коді зазвичай є хоча б одна цифра.
-            // Якщо самі букви/символи — це, скоріше за все, текст/посилання.
             if (!/\d/.test(sn)) return true;
 
             const lower = sn.toLowerCase();
-
-            // Посилання і службові URI
             const urlSchemes = [
                 'http://', 'https://', 'ftp://', 'ftps://',
                 'mailto:', 'tel:', 'sms:', 'smsto:',
@@ -209,15 +203,10 @@
                 if (lower.startsWith(scheme)) return true;
             }
 
-            // vCard / MECARD
             if (/^begin:(vcard|vcalendar)/i.test(sn)) return true;
             if (/^mecard:/i.test(sn)) return true;
-
-            // Явний www
             if (/^www\./i.test(sn)) return true;
 
-            // Домен (щось типу bit.ly/xyz, t.me/abc, example.com/...)
-            // Формула: є крапка між літерами/цифрами + доменне закінчення з 2-6 літер + слеш/кінець
             if (/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+\/\S*/i.test(sn)) return true;
             if (/^[a-z0-9][a-z0-9-]*\.(com|ua|net|org|io|me|ly|gg|ru|info|biz|app|dev|co|tv|cc|xyz|site|shop|store|online|link)(\/|$)/i.test(sn)) return true;
 
@@ -271,7 +260,6 @@
                 `;
                 listDiv.appendChild(item);
             });
-            // Прив'язуємо обробники на кнопки видалення (без inline-onclick, безпечніше)
             listDiv.querySelectorAll('.code-remove').forEach(btn => {
                 btn.addEventListener('click', (e) => {
                     removeCodeByNormalized(e.currentTarget.dataset.code);
@@ -320,28 +308,40 @@
             verbose: false
         });
 
+        // --- КРИТИЧНІ ЗМІНИ ДЛЯ CODE128 ---
         const config = {
-            fps: 10,
+            fps: 15,  // ПІДНЯЛИ з 10 до 15 — для 1D кодів більше кадрів = більше шансів зловити фокус
             qrbox: function(vw, vh) {
+                // ЗБІЛЬШИЛИ рамку: широка і достатньо висока,
+                // щоб довгі Code128 (20+ символів) вміщались повністю
                 return {
-                    width: Math.min(vw * 0.85, 400),
-                    height: Math.min(vh * 0.6, 180)
+                    width: Math.floor(vw * 0.95),   // майже на всю ширину
+                    height: Math.floor(vh * 0.55)   // більше половини висоти камери
                 };
             },
+            aspectRatio: 1.7777,  // 16:9, найбільш стабільне на iOS
             videoConstraints: {
                 facingMode: { ideal: "environment" },
-                width: { ideal: 1920 },
-                height: { ideal: 1080 },
-                advanced: [{ focusMode: "continuous" }]
+                width: { min: 1280, ideal: 1920, max: 2560 },
+                height: { min: 720, ideal: 1080, max: 1440 },
+                advanced: [
+                    { focusMode: "continuous" },
+                    { focusDistance: 0.1 },  // ближній фокус — наклейки зблизька
+                    { zoom: 1.0 }
+                ]
             },
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true }
+            // ВИМКНЕНО нативний BarcodeDetector — на iOS він глючить у Telegram WebApp.
+            // ZXing-декодер всередині html5-qrcode стабільніший
+            experimentalFeatures: {
+                useBarCodeDetectorIfSupported: false
+            },
+            disableFlip: true  // не шукати дзеркально перевернуті коди = швидше
         };
 
         html5QrCode.start(
             { facingMode: { ideal: "environment" } },
             config,
             (decodedText) => {
-                // Розділяємо по будь-яких пробілах/переносах/табах/комах/крапках з комою
                 let tokens = decodedText.split(/[\s,;]+/);
 
                 let addedCount = 0;
@@ -367,7 +367,6 @@
 
                 let now = Date.now();
 
-                // Новий код(и) додано
                 if (addedCount > 0) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
@@ -383,19 +382,15 @@
                     return;
                 }
 
-                // Нічого не додано — або все дублі, або все посилання
                 if (addedCount === 0 && now - lastErrorTime > 2000) {
                     lastErrorTime = now;
 
-                    // Якщо усе виявилось посиланнями — показуємо м'яке повідомлення без гучної помилки
                     if (allWereLinks && tokens.length > 0) {
                         document.getElementById('last-code').innerText = "🔗 Посилання пропущено";
-                        // тихий короткий сигнал
                         if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
                         return;
                     }
 
-                    // Інакше це дубль(і) — звук помилки + мигання
                     if (duplicateNormCodes.length > 0) {
                         playSound('error');
                         if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
