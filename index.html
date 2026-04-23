@@ -11,14 +11,15 @@
         #interactive { width: 100%; height: 100vh; position: relative; }
         video { width: 100%; height: 100%; object-fit: cover; }
         canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        /* Зелена рамка фокусу */
         .overlay {
             position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            width: 250px; height: 150px; border: 2px solid #00ff00; border-radius: 10px;
-            box-shadow: 0 0 0 500px rgba(0, 0, 0, 0.5); pointer-events: none;
+            width: 260px; height: 160px; border: 2px solid #00ff00; border-radius: 12px;
+            box-shadow: 0 0 0 1000px rgba(0, 0, 0, 0.5); pointer-events: none;
         }
-        .status {
-            position: absolute; bottom: 50px; width: 100%; text-align: center;
-            color: #fff; font-size: 18px; z-index: 10; font-weight: bold;
+        .status-box {
+            position: absolute; bottom: 40px; width: 100%; text-align: center;
+            color: #fff; font-size: 18px; z-index: 10; text-shadow: 1px 1px 2px #000;
         }
     </style>
 </head>
@@ -26,20 +27,24 @@
 
 <div id="interactive"></div>
 <div class="overlay"></div>
-<div class="status" id="status">Шукаю штрих-код...</div>
+<div class="status-box" id="status">Наведіть на штрих-код</div>
 
 <script>
     const tg = window.Telegram.WebApp;
     tg.expand();
 
-    let isScanning = true;
+    let isDetected = false;
 
     Quagga.init({
         inputStream: {
             name: "Live",
             type: "LiveStream",
             target: document.querySelector('#interactive'),
-            constraints: { facingMode: "environment" }
+            constraints: { 
+                facingMode: "environment",
+                width: { min: 640 },
+                height: { min: 480 }
+            }
         },
         decoder: {
             readers: ["code_128_reader", "ean_reader", "code_39_reader"]
@@ -48,28 +53,29 @@
     }, function(err) {
         if (err) {
             console.error(err);
-            alert("Помилка камери");
+            document.getElementById('status').innerText = "Помилка камери";
             return;
         }
         Quagga.start();
     });
 
     Quagga.onDetected(function(result) {
-        if (!isScanning) return;
+        if (isDetected) return;
         
         const code = result.codeResult.code;
-        if (code) {
-            isScanning = false;
+        if (code && code.length > 3) {
+            isDetected = true;
             document.getElementById('status').innerText = "Зчитано: " + code;
             
-            // Відправляємо в бот і закриваємо
-            tg.sendData(code);
-            
+            // ВІБРАЦІЯ ТА ВІДПРАВКА
             if (navigator.vibrate) navigator.vibrate(100);
             
+            tg.sendData(code);
+            
+            // Закриваємо через невелику паузу для успішного відправлення
             setTimeout(() => {
                 tg.close();
-            }, 500);
+            }, 600);
         }
     });
 </script>
