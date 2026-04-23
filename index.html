@@ -2,192 +2,142 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
-    <title>Greentech Smart Scanner</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        :root { --bg-color: #000; --card-bg: #1c1c1e; --accent: #0a84ff; --success: #30d158; --danger: #ff453a; --text-main: #fff; --text-muted: #ebebf599; }
-        body { background: var(--bg-color); color: var(--text-main); margin: 0; font-family: -apple-system, sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        body { background: #18222d; color: white; text-align: center; margin: 0; padding: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
-        .camera-section { position: relative; width: 100%; height: 45vh; background: #111; overflow: hidden; border-bottom-left-radius: 24px; border-bottom-right-radius: 24px; box-shadow: 0 4px 20px rgba(0,0,0,0.5); z-index: 10; }
-        #reader { width: 100%; height: 100%; }
+        /* Блок камери з плавною зміною кольору для помилки */
+        #reader { width: 100%; flex-grow: 1; background: #000; box-sizing: border-box; border-bottom: 3px solid #2ea6ff; transition: border 0.2s, box-shadow 0.2s; }
         
-        .scan-line { position: absolute; top: 20%; left: 10%; width: 80%; height: 2px; background: var(--success); box-shadow: 0 0 10px var(--success); animation: scan 2.5s infinite alternate ease-in-out; pointer-events: none; }
-        @keyframes scan { 0% { top: 20%; opacity: 0; } 10% { opacity: 1; } 90% { opacity: 1; } 100% { top: 80%; opacity: 0; } }
+        /* Клас, який додає червону рамку при дублікаті */
+        .error-flash { border: 6px solid #ff3b30 !important; box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.8); }
 
-        .list-section { flex-grow: 1; padding: 20px 16px; display: flex; flex-direction: column; overflow: hidden; }
-        .header { display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
-        .header h2 { margin: 0; font-size: 28px; font-weight: 700; }
-        .header .badge { background: var(--card-bg); padding: 6px 12px; border-radius: 20px; font-size: 14px; font-weight: 600; color: var(--accent); }
-
-        #codes-list { flex-grow: 1; overflow-y: auto; padding-bottom: 80px; }
+        .stats { padding: 15px; height: 120px; display: flex; flex-direction: column; justify-content: center; background: #18222d; }
         
-        .code-card { display: flex; justify-content: space-between; align-items: center; background: var(--card-bg); margin-bottom: 10px; padding: 16px; border-radius: 16px; }
-        .code-info { display: flex; flex-direction: column; gap: 4px; }
-        .code-title { font-size: 12px; color: var(--text-muted); text-transform: uppercase; font-weight: 600; }
-        .code-val { font-size: 16px; font-weight: 500; font-family: monospace; }
-        
-        .delete-btn { background: rgba(255, 69, 58, 0.15); color: var(--danger); width: 36px; height: 36px; border-radius: 18px; display: flex; justify-content: center; align-items: center; font-size: 20px; font-weight: bold; cursor: pointer; }
-
-        .bottom-action { padding: 16px; padding-bottom: 30px; background: linear-gradient(0deg, rgba(0,0,0,1) 60%, rgba(0,0,0,0) 100%); position: absolute; bottom: 0; width: 100%; box-sizing: border-box; }
-        .main-btn { background: var(--accent); color: white; border: none; padding: 18px; font-size: 18px; border-radius: 16px; width: 100%; font-weight: 600; display: none; }
-
-        #toast { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); background: rgba(28, 28, 30, 0.9); backdrop-filter: blur(10px); padding: 10px 20px; border-radius: 20px; font-size: 14px; font-weight: 500; opacity: 0; transition: opacity 0.3s; z-index: 100; pointer-events: none; }
+        /* Кнопка піднята вище, щоб обійти рекламу tiiny.host */
+        .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 90%; margin: 0 auto 60px auto; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000;}
     </style>
 </head>
 <body>
-
-    <div id="toast">Повідомлення</div>
-    <div class="camera-section"><div id="reader"></div><div class="scan-line"></div></div>
-    
-    <div class="list-section">
-        <div class="header">
-            <h2>Кошик</h2>
-            <div class="badge"><span id="count-val">0</span> шт</div>
-        </div>
-        <div id="codes-list"></div>
+    <div id="reader"></div>
+    <div class="stats">
+        <h2 id="count-text" style="color: #4caf50; margin: 0 0 5px 0;">Відскановано: 0</h2>
+        <p id="last-code" style="color: #aaa; margin: 0;">Наведіть рамку на код(и)</p>
     </div>
-
-    <div class="bottom-action">
-        <button class="main-btn" id="send-btn" onclick="sendData()">Відправити в базу</button>
-    </div>
+    <button class="btn" id="send-btn" onclick="sendData()">📤 ПЕРЕДАТИ В БОТ</button>
 
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
-        tg.disableVerticalSwipes();
+        let scannedCodes = new Set();
+        let lastErrorTime = 0; // Запобіжник для спаму помилками
         
-        let scannedCodes = []; 
-        let lastErrorTime = 0;
+        // --- ГЕНЕРАТОР ЗВУКІВ ---
+        const AudioContext = window.AudioContext || window.webkitAudioContext;
+        const audioCtx = new AudioContext();
 
-        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         function playSound(type) {
             if (audioCtx.state === 'suspended') audioCtx.resume();
-            const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            if (type === 'success') {
-                osc.type = 'sine'; osc.frequency.setValueAtTime(800, audioCtx.currentTime);
-                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.15);
-            } else if (type === 'error') {
-                osc.type = 'triangle'; osc.frequency.setValueAtTime(300, audioCtx.currentTime);
-                gain.gain.setValueAtTime(0.3, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
-            }
-            osc.start(); osc.stop(audioCtx.currentTime + 0.2);
-        }
-
-        function showToast(message, color) {
-            const toast = document.getElementById('toast');
-            toast.innerText = message; toast.style.color = color; toast.style.opacity = '1';
-            setTimeout(() => toast.style.opacity = '0', 2000);
-        }
-
-        function updateUI() {
-            document.getElementById('count-val').innerText = scannedCodes.length;
-            const listDiv = document.getElementById('codes-list');
-            const btn = document.getElementById('send-btn');
+            const oscillator = audioCtx.createOscillator();
+            const gainNode = audioCtx.createGain();
+            oscillator.connect(gainNode);
+            gainNode.connect(audioCtx.destination);
             
-            if (scannedCodes.length > 0) {
-                btn.style.display = "block";
-                listDiv.innerHTML = scannedCodes.map((code, index) => `
-                    <div class="code-card">
-                        <div class="code-info"><span class="code-title">Серійний номер</span><span class="code-val">${code}</span></div>
-                        <div class="delete-btn" onclick="removeCode(${index})">✕</div>
-                    </div>
-                `).join('');
-            } else {
-                btn.style.display = "none";
-                listDiv.innerHTML = "<div style='color:var(--text-muted); text-align:center; margin-top:40px;'>Наведіть камеру на штрих-код...</div>";
+            if (type === 'success') {
+                oscillator.type = 'sine';
+                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); // Високий пік
+                gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.1);
+            } else if (type === 'error') {
+                oscillator.type = 'sawtooth';
+                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime); // Низький звук
+                gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+                oscillator.start(audioCtx.currentTime);
+                oscillator.stop(audioCtx.currentTime + 0.3);
             }
         }
-
-        window.removeCode = function(index) {
-            scannedCodes.splice(index, 1);
-            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-            updateUI();
-        };
+        // -----------------------
 
         const html5QrCode = new Html5Qrcode("reader");
-        
         const config = { 
-            fps: 30,
-            qrbox: function(vw, vh) { return { width: vw * 0.9, height: 180 }; },
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-            videoConstraints: {
-                facingMode: "environment",
-                width: { min: 1280, ideal: 1920 }, // HD якість для айфона
-                height: { min: 720, ideal: 1080 }
-            },
-            // МАКСИМАЛЬНА БАЗА ФОРМАТІВ ДЛЯ ЕЛЕКТРОНІКИ ТА ЛОГІСТИКИ
-            formatsToSupport: [ 
-                Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.DATA_MATRIX,
-                Html5QrcodeSupportedFormats.PDF_417,
-                Html5QrcodeSupportedFormats.CODE_128, 
-                Html5QrcodeSupportedFormats.CODE_39, 
-                Html5QrcodeSupportedFormats.CODE_93,
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.EAN_8,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.ITF,
-                Html5QrcodeSupportedFormats.CODABAR
-            ]
+            fps: 15, 
+            qrbox: function(vw, vh) { return { width: vw * 0.85, height: Math.min(vh * 0.4, 300) }; }
         };
 
         html5QrCode.start(
             { facingMode: "environment" }, 
             config,
             (decodedText) => {
-                let serials = decodedText.split(/[\s,;|\n\r]+/);
+                let serials = decodedText.split(/\s+/);
                 let addedAny = false;
                 let hasDuplicates = false;
 
                 serials.forEach(sn => {
                     sn = sn.trim();
-                    if (/^https?:\/\/|www\./i.test(sn)) return; 
-                    if (!/\d/.test(sn)) return; 
+                    if (/^https?:\/\/|www\./i.test(sn)) return;
+                    if (!/\d/.test(sn)) return;
                     if (sn.length < 4) return;
 
-                    if (!scannedCodes.includes(sn)) {
-                        scannedCodes.unshift(sn);
-                        addedAny = true;
-                    } else {
-                        hasDuplicates = true;
+                    if (sn) {
+                        if (!scannedCodes.has(sn)) {
+                            scannedCodes.add(sn);
+                            addedAny = true;
+                        } else {
+                            hasDuplicates = true;
+                        }
                     }
                 });
 
                 let now = Date.now();
 
+                // ЯКЩО ДОДАНО НОВИЙ КОД:
                 if (addedAny) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                    showToast(serials.length > 1 ? `✅ Зчитано ${serials.length} шт` : "✅ Зчитано", "var(--success)");
-                    updateUI();
+                    
+                    document.getElementById('count-text').innerText = "Відскановано: " + scannedCodes.size;
+                    
+                    if (serials.length > 1) {
+                        document.getElementById('last-code').innerText = "📦 Додано пакетом";
+                    } else {
+                        let lastValid = Array.from(scannedCodes).pop();
+                        document.getElementById('last-code').innerText = "Останній: " + lastValid;
+                    }
+                    
+                    document.getElementById('send-btn').style.display = "block";
                 } 
+                // ЯКЩО КОД ВЖЕ БУВ (і пройшло більше 2 секунд з попереднього сигналу помилки)
                 else if (hasDuplicates && (now - lastErrorTime > 2000)) {
                     lastErrorTime = now;
                     playSound('error');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                    showToast("⚠️ Цей код вже додано", "var(--danger)");
+                    
+                    document.getElementById('last-code').innerText = "⚠️ ЦЕЙ КОД ВЖЕ ВІДСКАНОВАНО!";
+                    
+                    // Блимаємо червоною рамкою
+                    let readerDiv = document.getElementById('reader');
+                    readerDiv.classList.add('error-flash');
+                    setTimeout(() => {
+                        readerDiv.classList.remove('error-flash');
+                    }, 500);
                 }
             },
             (errorMessage) => {}
         ).catch((err) => {
-            showToast("Камера недоступна", "var(--danger)");
+            document.getElementById('last-code').innerText = "Помилка камери: " + err;
         });
 
-        window.sendData = function() {
-            if (scannedCodes.length > 0) {
-                if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('heavy');
-                tg.sendData(scannedCodes.join('|'));
-                tg.close();
+        function sendData() {
+            if (scannedCodes.size > 0) {
+                tg.sendData(Array.from(scannedCodes).join('|'));
             }
         }
-        
-        updateUI(); 
     </script>
 </body>
 </html>
