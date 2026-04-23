@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+</head>
+<body>
+    <script>
+        let tg = window.Telegram.WebApp;
+        tg.expand();
+
+        // Це відкриває системний сканер, який розпізнає штрих-коди миттєво
+        tg.showScanQrPopup({
+            text: "Наведіть на штрих-код Greentech"
+        }, function(text) {
+            // Як тільки системний сканер "піймав" код:
+            tg.sendData(text); // Відправляємо текст боту
+            tg.closeScanQrPopup();
+            tg.close();
+            return true;
+        });
+
+        tg.onEvent('scanQrPopupClosed', () => { tg.close(); });
+    </script>
+</body>
+</html>
