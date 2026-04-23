@@ -2,569 +2,119 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Сканер Greentech</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Greentech Professional Scanner</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
-        * { box-sizing: border-box; }
-
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-        }
-
-        body {
-            background: #18222d;
-            color: white;
-            text-align: center;
-            font-family: sans-serif;
-            position: fixed;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
-        }
-
-        /* ------------ iOS: html5-qrcode в div#reader ------------ */
-        #reader {
-            width: 100%;
-            background: #000;
-            border-bottom: 3px solid #2ea6ff;
-            position: relative;
-            overflow: hidden;
-            flex-shrink: 0;
-            display: none; /* за замовчуванням — ховаємо; показуємо лише на iOS */
-        }
-
-        body.is-ios #reader {
-            display: block;
-        }
-
-        body.is-ios #reader video,
-        body.is-ios #reader canvas,
-        body.is-ios #reader img {
-            width: 100% !important;
-            height: 100% !important;
-            object-fit: cover !important;
-            position: absolute !important;
-            top: 0 !important;
-            left: 0 !important;
-        }
-
-        body.is-ios #reader__dashboard,
-        body.is-ios #reader__dashboard_section,
-        body.is-ios #reader__header_message,
-        body.is-ios #reader__status_span,
-        body.is-ios #reader__filescan_input,
-        body.is-ios #reader__camera_permission_button {
-            display: none !important;
-        }
-
-        /* ------------ Android / інше: власний <video> ------------ */
-        #native-cam {
-            width: 100%;
-            background: #000;
-            border-bottom: 3px solid #2ea6ff;
-            position: relative;
-            overflow: hidden;
-            flex-shrink: 0;
-            display: none;
-        }
-        body:not(.is-ios) #native-cam {
-            display: block;
-        }
-
-        #native-video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-        }
-
-        /* Рамка сканування поверх відео */
-        .scan-frame {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 85%;
-            height: 55%;
-            border: 3px solid rgba(255,255,255,0.85);
-            border-radius: 12px;
-            pointer-events: none;
-            box-shadow: 0 0 0 9999px rgba(0,0,0,0.25);
-        }
-
-        .error-flash {
-            box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.8) !important;
-            border-bottom: 6px solid #ff3b30 !important;
-        }
-
-        /* ------------ Інше UI ------------ */
-        .stats {
-            padding: 8px 15px;
-            background: #18222d;
-            border-bottom: 1px solid #2a3a4d;
-            flex-shrink: 0;
-        }
-        .stats h2 { color: #4caf50; margin: 0 0 3px 0; font-size: 18px; }
-        .stats p { color: #aaa; margin: 0; font-size: 13px; }
-
-        #codes-list {
-            flex: 1 1 auto;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            padding: 8px 12px;
-            background: #0f1720;
-            text-align: left;
-            min-height: 0;
-        }
-        .code-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 8px 12px;
-            margin: 4px 0;
-            background: #253344;
-            border-radius: 8px;
-            font-size: 14px;
-            font-family: 'Courier New', monospace;
-            animation: slideIn 0.2s ease-out;
-        }
-        .code-item.duplicate-flash {
-            background: #5a1f1f;
-            transition: background 0.5s;
-        }
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateY(-5px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .code-num { color: #2ea6ff; font-weight: bold; margin-right: 8px; }
-        .code-text { flex-grow: 1; word-break: break-all; color: #fff; }
-        .code-remove {
-            background: #ff3b30; color: white;
-            border: none; border-radius: 50%;
-            width: 26px; height: 26px;
-            font-size: 14px; cursor: pointer;
-            flex-shrink: 0; margin-left: 8px;
-            padding: 0; line-height: 1;
-        }
-        .empty-hint {
-            color: #5a6a7a;
-            text-align: center;
-            padding: 20px;
-            font-style: italic;
-        }
-
-        .btn {
-            background: #2ea6ff; color: white; border: none;
-            padding: 14px; font-size: 17px; border-radius: 10px;
-            width: 92%; margin: 8px auto 20px auto;
-            display: none; font-weight: bold;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            flex-shrink: 0;
-        }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; }
+        #video-container { position: relative; width: 100%; height: 80vh; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 250px; height: 150px; border: 2px solid #00ff00; border-radius: 15px; box-shadow: 0 0 20px rgba(0,255,0,0.5); pointer-events: none; }
+        .ui { padding: 15px; text-align: center; background: #1a1a1a; flex-grow: 1; }
+        .status { font-size: 14px; color: #00ff00; margin-bottom: 10px; }
+        button { background: #444; color: white; border: none; padding: 10px 20px; border-radius: 8px; }
     </style>
 </head>
 <body>
-    <!-- iOS: html5-qrcode рендерить сюди -->
-    <div id="reader"></div>
 
-    <!-- Android / все інше: власний плеєр + BarcodeDetector -->
-    <div id="native-cam">
-        <video id="native-video" autoplay playsinline muted></video>
-        <div class="scan-frame"></div>
-    </div>
+<div id="video-container">
+    <video id="video" playsinline></video>
+    <div class="overlay"></div>
+</div>
 
-    <div class="stats">
-        <h2 id="count-text">Відскановано: 0</h2>
-        <p id="last-code">Наведіть рамку на код(и)</p>
-    </div>
+<div class="ui">
+    <div id="status" class="status">Шукаю код (Greentech)...</div>
+    <button onclick="location.reload()">🔄 ПЕРЕЗАПУСТИТИ</button>
+</div>
 
-    <div id="codes-list">
-        <div class="empty-hint">Поки що нічого не відскановано</div>
-    </div>
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
 
-    <button class="btn" id="send-btn" onclick="sendData()">📤 ПЕРЕДАТИ В БОТ</button>
+    const video = document.getElementById('video');
+    const status = document.getElementById('status');
+    let isProcessing = false;
 
-    <script>
-        let tg = window.Telegram.WebApp;
-        tg.expand();
+    // Функція фільтрації та розбору коду
+    function processScannedData(data) {
+        if (isProcessing) return;
 
-        // --- ПЛАТФОРМА ---
-        const ua = navigator.userAgent || '';
-        const isIOS = /iPhone|iPad|iPod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-        const isAndroid = /Android/i.test(ua);
-        document.body.classList.add(isIOS ? 'is-ios' : (isAndroid ? 'is-android' : 'is-other'));
-
-        // --- МАКЕТ ---
-        function updateLayout() {
-            const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
-            const cameraHeight = Math.round(vh * 0.50);
-
-            const reader = document.getElementById('reader');
-            const nativeCam = document.getElementById('native-cam');
-
-            reader.style.height = cameraHeight + 'px';
-            reader.style.maxHeight = cameraHeight + 'px';
-            reader.style.minHeight = cameraHeight + 'px';
-
-            nativeCam.style.height = cameraHeight + 'px';
-            nativeCam.style.maxHeight = cameraHeight + 'px';
-            nativeCam.style.minHeight = cameraHeight + 'px';
-
-            document.body.style.height = vh + 'px';
+        // 1. Ігноруємо посилання (http, https, www)
+        const urlPattern = /^(http|https|www|ftp):\/\/[^\s/$.?#].[^\s]*$/i;
+        if (urlPattern.test(data.trim())) {
+            console.log("Ігнорую посилання:", data);
+            return;
         }
 
-        updateLayout();
-        tg.onEvent('viewportChanged', updateLayout);
-        window.addEventListener('resize', updateLayout);
-        window.addEventListener('orientationchange', () => setTimeout(updateLayout, 300));
+        isProcessing = true;
 
-        // --- СТАН ---
-        let scannedList = [];
-        let scannedSet = new Set();
-        let lastErrorTime = 0;
+        // 2. Розбиваємо "складні" коди (якщо вшито кілька через пробіл, кому або крапку з комою)
+        // Наприклад: "SN123,SN456,SN789" -> ["SN123", "SN456", "SN789"]
+        let codes = data.split(/[\s,;]+/).filter(c => c.length > 2);
 
-        function normalize(code) {
-            return code.replace(/\s+/g, '').toUpperCase();
-        }
+        if (codes.length > 0) {
+            status.innerText = "✅ Зчитано: " + codes.join(", ");
+            status.style.color = "#ffff00";
 
-        function isUnwantedToken(sn) {
-            if (!sn) return true;
-            if (sn.length < 4) return true;
-            if (!/\d/.test(sn)) return true;
-
-            const lower = sn.toLowerCase();
-            const urlSchemes = [
-                'http://', 'https://', 'ftp://', 'ftps://',
-                'mailto:', 'tel:', 'sms:', 'smsto:',
-                'geo:', 'maps:',
-                'wifi:', 'matmsg:', 'bitcoin:',
-                'viber://', 'tg://', 'whatsapp://'
-            ];
-            for (const scheme of urlSchemes) {
-                if (lower.startsWith(scheme)) return true;
-            }
-
-            if (/^begin:(vcard|vcalendar)/i.test(sn)) return true;
-            if (/^mecard:/i.test(sn)) return true;
-            if (/^www\./i.test(sn)) return true;
-            if (/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+\/\S*/i.test(sn)) return true;
-            if (/^[a-z0-9][a-z0-9-]*\.(com|ua|net|org|io|me|ly|gg|ru|info|biz|app|dev|co|tv|cc|xyz|site|shop|store|online|link)(\/|$)/i.test(sn)) return true;
-
-            return false;
-        }
-
-        // --- ЗВУКИ ---
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioContext();
-        function playSound(type) {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            if (type === 'success') {
-                oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime);
-                gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-                oscillator.start(audioCtx.currentTime);
-                oscillator.stop(audioCtx.currentTime + 0.1);
-            } else if (type === 'error') {
-                oscillator.type = 'sawtooth';
-                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime);
-                gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-                oscillator.start(audioCtx.currentTime);
-                oscillator.stop(audioCtx.currentTime + 0.3);
-            }
-        }
-
-        // --- СПИСОК ---
-        function renderList() {
-            const listDiv = document.getElementById('codes-list');
-            if (scannedList.length === 0) {
-                listDiv.innerHTML = '<div class="empty-hint">Поки що нічого не відскановано</div>';
-                document.getElementById('send-btn').style.display = 'none';
-                return;
-            }
-            listDiv.innerHTML = '';
-            scannedList.forEach((code, idx) => {
-                const item = document.createElement('div');
-                item.className = 'code-item';
-                item.dataset.code = normalize(code);
-                item.innerHTML = `
-                    <span class="code-num">${idx + 1}.</span>
-                    <span class="code-text">${code}</span>
-                    <button class="code-remove" data-code="${normalize(code).replace(/"/g,'&quot;')}">×</button>
-                `;
-                listDiv.appendChild(item);
-            });
-            listDiv.querySelectorAll('.code-remove').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    removeCodeByNormalized(e.currentTarget.dataset.code);
-                });
-            });
-            listDiv.scrollTop = listDiv.scrollHeight;
-            document.getElementById('send-btn').style.display = 'block';
-        }
-
-        function removeCodeByNormalized(normCode) {
-            scannedList = scannedList.filter(c => normalize(c) !== normCode);
-            scannedSet.delete(normCode);
-            document.getElementById('count-text').innerText = "Відскановано: " + scannedList.length;
-            renderList();
-        }
-
-        function flashDuplicate(normCode) {
-            document.querySelectorAll('.code-item').forEach(item => {
-                if (item.dataset.code === normCode) {
-                    item.classList.add('duplicate-flash');
-                    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    setTimeout(() => item.classList.remove('duplicate-flash'), 1000);
-                }
-            });
-        }
-
-        // --- ОБРОБКА ВІДСКАНОВАНИХ ДАНИХ (спільна для обох движків) ---
-        function handleScanResult(decodedText) {
-            let tokens = decodedText.split(/[\s,;]+/);
-            let addedCount = 0;
-            let duplicateNormCodes = [];
-            let allWereLinks = tokens.every(t => {
-                const tt = t.trim();
-                return tt && isUnwantedToken(tt);
-            });
-
-            tokens.forEach(sn => {
-                sn = sn.trim();
-                if (isUnwantedToken(sn)) return;
-                const norm = normalize(sn);
-                if (!scannedSet.has(norm)) {
-                    scannedSet.add(norm);
-                    scannedList.push(sn);
-                    addedCount++;
-                } else {
-                    duplicateNormCodes.push(norm);
-                }
-            });
-
-            let now = Date.now();
-
-            if (addedCount > 0) {
-                playSound('success');
-                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                document.getElementById('count-text').innerText = "Відскановано: " + scannedList.length;
-                if (addedCount > 1) {
-                    document.getElementById('last-code').innerText = `📦 Додано ${addedCount} шт. пакетом`;
-                } else {
-                    document.getElementById('last-code').innerText = "✅ " + scannedList[scannedList.length - 1];
-                }
-                renderList();
-                return;
-            }
-
-            if (addedCount === 0 && now - lastErrorTime > 2000) {
-                lastErrorTime = now;
-                if (allWereLinks && tokens.length > 0) {
-                    document.getElementById('last-code').innerText = "🔗 Посилання пропущено";
-                    if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-                    return;
-                }
-                if (duplicateNormCodes.length > 0) {
-                    playSound('error');
-                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                    document.getElementById('last-code').innerText = "⚠️ Вже є у списку";
-                    let camDiv = isIOS ? document.getElementById('reader') : document.getElementById('native-cam');
-                    camDiv.classList.add('error-flash');
-                    setTimeout(() => camDiv.classList.remove('error-flash'), 500);
-                    flashDuplicate(duplicateNormCodes[0]);
-                }
-            }
-        }
-
-        // ==============================================
-        // iOS шлях — html5-qrcode
-        // ==============================================
-        function startIOS() {
-            const formatsToSupport = [
-                Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.EAN_8,
-                Html5QrcodeSupportedFormats.CODE_128,
-                Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.CODE_93,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.ITF,
-                Html5QrcodeSupportedFormats.DATA_MATRIX,
-                Html5QrcodeSupportedFormats.PDF_417,
-                Html5QrcodeSupportedFormats.AZTEC,
-                Html5QrcodeSupportedFormats.CODABAR
-            ];
-
-            const html5QrCode = new Html5Qrcode("reader", {
-                formatsToSupport: formatsToSupport,
-                verbose: false
-            });
-
-            const config = {
-                fps: 15,
-                qrbox: function(vw, vh) {
-                    return { width: Math.floor(vw * 0.95), height: Math.floor(vh * 0.55) };
-                },
-                aspectRatio: 1.7777,
-                videoConstraints: {
-                    facingMode: { ideal: "environment" },
-                    width: { min: 1280, ideal: 1920 },
-                    height: { min: 720, ideal: 1080 },
-                    advanced: [{ focusMode: "continuous" }]
-                },
-                experimentalFeatures: { useBarCodeDetectorIfSupported: false },
-                disableFlip: true
-            };
-
-            html5QrCode.start(
-                { facingMode: { ideal: "environment" } },
-                config,
-                handleScanResult,
-                () => {}
-            ).catch((err) => {
-                document.getElementById('last-code').innerText = "Помилка камери: " + err;
-            });
-
-            // MutationObserver, щоб стримати fullscreen на iOS
-            const reader = document.getElementById('reader');
-            const observer = new MutationObserver(() => {
-                const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
-                const cameraHeight = Math.round(vh * 0.50);
-                if (reader.offsetHeight !== cameraHeight) {
-                    reader.style.height = cameraHeight + 'px';
-                }
-            });
-            observer.observe(reader, { attributes: true, attributeFilter: ['style'] });
-        }
-
-        // ==============================================
-        // Android / інше — власний video + BarcodeDetector
-        // Fallback: якщо BarcodeDetector відсутній, використовуємо html5-qrcode
-        // ==============================================
-        async function startNative() {
-            const video = document.getElementById('native-video');
-            let stream;
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        facingMode: { ideal: "environment" },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 }
-                    }
-                });
-            } catch (err) {
-                document.getElementById('last-code').innerText = "Немає доступу до камери: " + err.message;
-                return;
-            }
-
-            video.srcObject = stream;
-            await video.play().catch(() => {});
-
-            // Якщо браузер підтримує нативний BarcodeDetector — чудово
-            if ('BarcodeDetector' in window) {
-                let detector;
-                try {
-                    detector = new BarcodeDetector({
-                        formats: [
-                            'qr_code', 'ean_13', 'ean_8',
-                            'code_128', 'code_39', 'code_93',
-                            'upc_a', 'upc_e', 'itf',
-                            'data_matrix', 'pdf417', 'aztec', 'codabar'
-                        ]
-                    });
-                } catch (e) {
-                    // Якщо конкретні формати не підтримуються — пробуємо без обмеження
-                    detector = new BarcodeDetector();
-                }
-
-                const tick = async () => {
-                    if (video.readyState >= 2) {
-                        try {
-                            const codes = await detector.detect(video);
-                            if (codes && codes.length > 0) {
-                                // Зберемо усі розпізнані значення через перенос рядка,
-                                // щоб handleScanResult міг обробити множинне розпізнавання
-                                const combined = codes.map(c => c.rawValue).join('\n');
-                                handleScanResult(combined);
-                            }
-                        } catch (e) { /* ignore */ }
-                    }
-                    requestAnimationFrame(tick);
-                };
-                requestAnimationFrame(tick);
-                return;
-            }
-
-            // Fallback: старший Android Chrome без BarcodeDetector -> html5-qrcode
-            // Зупиняємо власне відео і віддаємо керування бібліотеці
-            stream.getTracks().forEach(t => t.stop());
-            video.srcObject = null;
-
-            document.getElementById('native-cam').style.display = 'none';
-            const readerEl = document.getElementById('reader');
-            readerEl.style.display = 'block';
-
-            const formatsToSupport = [
-                Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.EAN_13,
-                Html5QrcodeSupportedFormats.EAN_8,
-                Html5QrcodeSupportedFormats.CODE_128,
-                Html5QrcodeSupportedFormats.CODE_39,
-                Html5QrcodeSupportedFormats.CODE_93,
-                Html5QrcodeSupportedFormats.UPC_A,
-                Html5QrcodeSupportedFormats.UPC_E,
-                Html5QrcodeSupportedFormats.ITF,
-                Html5QrcodeSupportedFormats.DATA_MATRIX,
-                Html5QrcodeSupportedFormats.PDF_417,
-                Html5QrcodeSupportedFormats.AZTEC,
-                Html5QrcodeSupportedFormats.CODABAR
-            ];
-            const html5QrCode = new Html5Qrcode("reader", { formatsToSupport, verbose: false });
-            html5QrCode.start(
-                { facingMode: { ideal: "environment" } },
-                {
-                    fps: 10,
-                    qrbox: function(vw, vh) { return { width: Math.floor(vw * 0.95), height: Math.floor(vh * 0.55) }; },
-                    videoConstraints: { facingMode: { ideal: "environment" }, width: { ideal: 1920 }, height: { ideal: 1080 } },
-                    experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-                    disableFlip: true
-                },
-                handleScanResult,
-                () => {}
-            ).catch((err) => {
-                document.getElementById('last-code').innerText = "Помилка камери: " + err;
-            });
-        }
-
-        // --- СТАРТ ---
-        if (isIOS) {
-            startIOS();
+            // Відправляємо боту (якщо кодів кілька, відправляємо їх через розділювач)
+            tg.sendData(codes.join("|")); 
+            
+            setTimeout(() => {
+                tg.close();
+            }, 500);
         } else {
-            startNative();
+            isProcessing = false;
         }
+    }
 
-        setTimeout(updateLayout, 500);
-        setTimeout(updateLayout, 1500);
-        setTimeout(updateLayout, 3000);
+    // Налаштування камери
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
+        video.srcObject = stream;
+        video.setAttribute("playsinline", true);
+        video.play();
+        requestAnimationFrame(tick);
+    });
 
-        function sendData() {
-            if (scannedList.length > 0) {
-                tg.sendData(scannedList.join('|'));
+    function tick() {
+        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+            const canvasElement = document.createElement("canvas");
+            const canvas = canvasElement.getContext("2d");
+            canvasElement.height = video.videoHeight;
+            canvasElement.width = video.videoWidth;
+            canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+            
+            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+
+            // АЛГОРИТМ 1: Пошук QR-коду
+            const qrCode = jsQR(imageData.data, imageData.width, imageData.height, {
+                inversionAttempts: "dontInvert",
+            });
+
+            if (qrCode && qrCode.data) {
+                processScannedData(qrCode.data);
+            }
+
+            // АЛГОРИТМ 2: Пошук штрих-коду (якщо QR не знайдено)
+            if (!isProcessing) {
+                Quagga.decodeSingle({
+                    src: canvasElement.toDataURL(),
+                    decoder: {
+                        readers: ["code_128_reader", "ean_reader", "code_39_reader"]
+                    },
+                    locate: true
+                }, function(result) {
+                    if (result && result.codeResult) {
+                        processScannedData(result.codeResult.code);
+                    }
+                });
             }
         }
-    </script>
+        if (!isProcessing) requestAnimationFrame(tick);
+    }
+</script>
+
 </body>
 </html>
