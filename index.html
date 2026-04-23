@@ -2,574 +2,171 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>Сканер Greentech</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Greentech Pro Scanner</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
-        * { box-sizing: border-box; }
-        html, body {
-            height: 100%;
-            margin: 0;
-            padding: 0;
-            overflow: hidden;
-            background: #18222d;
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        #video-container { position: relative; width: 100%; height: 45vh; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 140px; border: 2px solid #007bff; border-radius: 15px; box-shadow: 0 0 20px rgba(0,123,255,0.4); pointer-events: none; }
+        
+        .list-panel { flex-grow: 1; background: #121212; padding: 12px; display: flex; flex-direction: column; border-top: 2px solid #333; }
+        .counter { font-size: 18px; font-weight: bold; color: #007bff; text-align: center; margin-bottom: 10px; }
+        #codes-list { flex-grow: 1; overflow-y: auto; background: #000; border-radius: 10px; padding: 5px; border: 1px solid #222; }
+        
+        .code-item { 
+            background: #1c1c1c; margin-bottom: 6px; padding: 12px; border-radius: 8px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-left: 4px solid #007bff; animation: slideIn 0.3s ease;
         }
-        body {
-            color: white;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            position: fixed;
-            inset: 0;
-            display: flex;
-            flex-direction: column;
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+        
+        .remove-btn { color: #ff4d4d; font-size: 22px; font-weight: bold; padding: 5px 12px; cursor: pointer; }
+        
+        .footer-btns { padding-top: 12px; }
+        #send-btn { 
+            width: 100%; background: #28a745; color: white; border: none; 
+            padding: 18px; border-radius: 12px; font-size: 18px; font-weight: bold; 
         }
-
-        .cam-wrap {
-            position: relative;
-            width: 100%;
-            background: #000;
-            overflow: hidden;
-            flex-shrink: 0;
-            border-bottom: 3px solid #2ea6ff;
-            transition: border-color 0.2s, box-shadow 0.2s;
-        }
-        .cam-wrap video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
-            display: block;
-        }
-        .cam-wrap.flash-error {
-            border-bottom-color: #ff3b30;
-            box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.7);
-        }
-
-        .scan-frame {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            width: 88%;
-            height: 60%;
-            border: 3px solid rgba(255, 255, 255, 0.9);
-            border-radius: 12px;
-            pointer-events: none;
-            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.3);
-        }
-
-        .cam-error {
-            position: absolute;
-            inset: 0;
-            display: none;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            padding: 20px;
-            color: #fff;
-            background: rgba(0,0,0,0.85);
-            text-align: center;
-            font-size: 14px;
-            z-index: 5;
-            white-space: pre-line;
-        }
-        .cam-error.show { display: flex; }
-
-        .loader {
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            flex-direction: column;
-            background: rgba(0,0,0,0.7);
-            z-index: 4;
-            color: #fff;
-            font-size: 14px;
-        }
-        .loader.hide { display: none; }
-        .spinner {
-            width: 40px; height: 40px;
-            border: 4px solid rgba(255,255,255,0.2);
-            border-top-color: #2ea6ff;
-            border-radius: 50%;
-            animation: spin 0.8s linear infinite;
-            margin-bottom: 12px;
-        }
-        @keyframes spin { to { transform: rotate(360deg); } }
-
-        .stats {
-            padding: 10px 15px;
-            background: #18222d;
-            border-bottom: 1px solid #2a3a4d;
-            flex-shrink: 0;
-        }
-        .stats h2 { color: #4caf50; margin: 0 0 3px 0; font-size: 18px; font-weight: 700; }
-        .stats p { color: #aaa; margin: 0; font-size: 13px; min-height: 18px; }
-
-        #codes-list {
-            flex: 1 1 auto;
-            overflow-y: auto;
-            -webkit-overflow-scrolling: touch;
-            padding: 8px 12px;
-            background: #0f1720;
-            text-align: left;
-            min-height: 0;
-        }
-        .code-item {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            padding: 10px 12px;
-            margin: 5px 0;
-            background: #253344;
-            border-radius: 8px;
-            font-size: 14px;
-            font-family: "SF Mono", Menlo, Consolas, monospace;
-            animation: slideIn 0.2s ease-out;
-        }
-        .code-item.duplicate-flash {
-            background: #5a1f1f;
-            transition: background 0.5s;
-        }
-        @keyframes slideIn {
-            from { opacity: 0; transform: translateY(-5px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-        .code-num { color: #2ea6ff; font-weight: 700; margin-right: 10px; flex-shrink: 0; }
-        .code-text { flex-grow: 1; word-break: break-all; color: #fff; }
-        .code-remove {
-            background: #ff3b30; color: white;
-            border: none; border-radius: 50%;
-            width: 28px; height: 28px;
-            font-size: 16px; cursor: pointer;
-            flex-shrink: 0; margin-left: 10px;
-            padding: 0; line-height: 1;
-        }
-        .empty-hint {
-            color: #5a6a7a;
-            text-align: center;
-            padding: 25px 15px;
-            font-style: italic;
-        }
-
-        .btn {
-            background: #2ea6ff; color: white; border: none;
-            padding: 14px; font-size: 17px; border-radius: 10px;
-            width: 92%; margin: 8px auto 20px auto;
-            display: none; font-weight: 700;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            flex-shrink: 0;
-            cursor: pointer;
-        }
-        .btn:active { transform: scale(0.98); }
-
-        .badge {
-            position: absolute;
-            top: 8px; right: 8px;
-            font-size: 10px;
-            padding: 3px 6px;
-            border-radius: 4px;
-            background: rgba(0,0,0,0.5);
-            color: #aaa;
-            pointer-events: none;
-            z-index: 3;
-        }
+        #send-btn:disabled { background: #444; color: #888; }
     </style>
 </head>
 <body>
-    <div class="cam-wrap" id="cam-wrap">
-        <video id="video" autoplay playsinline muted></video>
-        <div class="scan-frame"></div>
-        <div class="badge" id="engine-badge"></div>
-        <div class="loader" id="loader">
-            <div class="spinner"></div>
-            <div id="loader-text">Завантаження декодера…</div>
-        </div>
-        <div class="cam-error" id="cam-error"></div>
+
+<div id="video-container">
+    <video id="video" playsinline></video>
+    <div class="scan-region"></div>
+</div>
+
+<div class="list-panel">
+    <div class="counter">📊 СКАНОВАНО: <span id="count">0</span> шт.</div>
+    <div id="codes-list"></div>
+    
+    <div class="footer-btns">
+        <button id="send-btn" onclick="sendToBot()" disabled>ВІДПРАВИТИ В БОТ (0)</button>
     </div>
+</div>
 
-    <div class="stats">
-        <h2 id="count-text">Відскановано: 0</h2>
-        <p id="last-code">Наведіть рамку на код</p>
-    </div>
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
 
-    <div id="codes-list">
-        <div class="empty-hint">Поки що нічого не відскановано</div>
-    </div>
+    const video = document.getElementById('video');
+    const codesList = document.getElementById('codes-list');
+    const countDisplay = document.getElementById('count');
+    const sendBtn = document.getElementById('send-btn');
+    
+    let scannedCodes = [];
+    let throttleTimeout = false;
 
-    <button class="btn" id="send-btn">📤 ПЕРЕДАТИ В БОТ</button>
+    function isValidCode(code) {
+        const text = code.trim();
+        
+        // 1. Ігноруємо посилання
+        if (/^(http|https|www|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(text)) return false;
+        
+        // 2. Ігноруємо, якщо в коді ТІЛЬКИ букви (немає жодної цифри)
+        if (!/\d/.test(text)) return false;
+        
+        // 3. Ігноруємо занадто короткі (менше 4 символів)
+        if (text.length < 4) return false;
 
-    <script>
-        const tg = window.Telegram.WebApp;
-        tg.expand();
+        return true;
+    }
 
-        // ============ МАКЕТ ============
-        function updateLayout() {
-            const vh = tg.viewportStableHeight || tg.viewportHeight || window.innerHeight;
-            const cameraHeight = Math.round(vh * 0.50);
-            document.getElementById('cam-wrap').style.height = cameraHeight + 'px';
-            document.body.style.height = vh + 'px';
-        }
-        updateLayout();
-        tg.onEvent('viewportChanged', updateLayout);
-        window.addEventListener('resize', updateLayout);
-        window.addEventListener('orientationchange', () => setTimeout(updateLayout, 300));
+    function addCode(code) {
+        if (throttleTimeout || scannedCodes.includes(code)) return;
+        if (!isValidCode(code)) return;
 
-        // ============ UI ============
-        const video = document.getElementById('video');
-        const camError = document.getElementById('cam-error');
-        const loader = document.getElementById('loader');
-        const loaderText = document.getElementById('loader-text');
-        const badge = document.getElementById('engine-badge');
+        scannedCodes.unshift(code);
+        updateUI();
 
-        function showError(text) {
-            loader.classList.add('hide');
-            camError.textContent = text;
-            camError.classList.add('show');
-        }
-        function hideLoader() { loader.classList.add('hide'); }
+        if (navigator.vibrate) navigator.vibrate(50);
 
-        // ============ СТАН ============
-        let scannedList = [];
-        let scannedSet = new Set();
-        let lastDuplicateTime = 0;
-        let lastLinkTime = 0;
+        throttleTimeout = true;
+        setTimeout(() => { throttleTimeout = false; }, 1300);
+    }
 
-        function normalize(code) {
-            return code.replace(/\s+/g, '').toUpperCase();
-        }
+    function removeCode(index) {
+        scannedCodes.splice(index, 1);
+        updateUI();
+    }
 
-        function isUnwantedToken(sn) {
-            if (!sn) return true;
-            if (sn.length < 4) return true;
-            if (!/\d/.test(sn)) return true;
-
-            const lower = sn.toLowerCase();
-            const schemes = [
-                'http://','https://','ftp://','ftps://',
-                'mailto:','tel:','sms:','smsto:',
-                'geo:','maps:','bitcoin:','matmsg:',
-                'wifi:','viber://','tg://','whatsapp://'
-            ];
-            for (const s of schemes) if (lower.startsWith(s)) return true;
-
-            if (/^begin:(vcard|vcalendar)/i.test(sn)) return true;
-            if (/^mecard:/i.test(sn)) return true;
-            if (/^www\./i.test(sn)) return true;
-            if (/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+\/\S*/i.test(sn)) return true;
-            if (/^[a-z0-9][a-z0-9-]*\.(com|ua|net|org|io|me|ly|gg|ru|info|biz|app|dev|co|tv|cc|xyz|site|shop|store|online|link)$/i.test(sn)) return true;
-
-            return false;
+    function updateUI() {
+        const len = scannedCodes.length;
+        countDisplay.innerText = len;
+        sendBtn.innerText = `ВІДПРАВИТИ В БОТ (${len})`;
+        sendBtn.disabled = len === 0;
+        
+        if (len === 0) {
+            codesList.innerHTML = "<div style='text-align:center; padding:30px; color:#444;'>Очікування штрих-коду...</div>";
+            return;
         }
 
-        const AudioCtx = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioCtx();
-        function beep(type) {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const osc = audioCtx.createOscillator();
-            const gain = audioCtx.createGain();
-            osc.connect(gain); gain.connect(audioCtx.destination);
-            if (type === 'ok') {
-                osc.type = 'sine';
-                osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
-                gain.gain.setValueAtTime(1, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-                osc.start(); osc.stop(audioCtx.currentTime + 0.1);
+        codesList.innerHTML = scannedCodes.map((code, index) => `
+            <div class="code-item">
+                <span style="font-family: monospace; font-size: 16px;">${code}</span>
+                <span class="remove-btn" onclick="removeCode(${index})">✕</span>
+            </div>
+        `).join("");
+    }
+
+    function sendToBot() {
+        if (scannedCodes.length > 0) {
+            tg.sendData(scannedCodes.join("|"));
+            tg.close();
+        }
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
+        video.srcObject = stream;
+        video.play();
+        requestAnimationFrame(tick);
+    });
+
+    function tick() {
+        if (video.readyState === video.HAVE_ENOUGH_DATA && !throttleTimeout) {
+            const canvasElement = document.createElement("canvas");
+            const canvas = canvasElement.getContext("2d");
+            canvasElement.height = video.videoHeight;
+            canvasElement.width = video.videoWidth;
+            canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+
+            // QR Scan (jsQR)
+            const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
+            if (qrCode) {
+                addCode(qrCode.data);
             } else {
-                osc.type = 'sawtooth';
-                osc.frequency.setValueAtTime(200, audioCtx.currentTime);
-                gain.gain.setValueAtTime(1, audioCtx.currentTime);
-                gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-                osc.start(); osc.stop(audioCtx.currentTime + 0.3);
-            }
-        }
-
-        function renderList() {
-            const listDiv = document.getElementById('codes-list');
-            if (scannedList.length === 0) {
-                listDiv.innerHTML = '<div class="empty-hint">Поки що нічого не відскановано</div>';
-                document.getElementById('send-btn').style.display = 'none';
-                return;
-            }
-            listDiv.innerHTML = '';
-            scannedList.forEach((code, idx) => {
-                const item = document.createElement('div');
-                item.className = 'code-item';
-                item.dataset.code = normalize(code);
-                item.innerHTML = `
-                    <span class="code-num">${idx + 1}.</span>
-                    <span class="code-text"></span>
-                    <button class="code-remove">×</button>
-                `;
-                item.querySelector('.code-text').textContent = code;
-                item.querySelector('.code-remove').addEventListener('click', () => {
-                    removeCode(normalize(code));
-                });
-                listDiv.appendChild(item);
-            });
-            listDiv.scrollTop = listDiv.scrollHeight;
-            document.getElementById('send-btn').style.display = 'block';
-        }
-
-        function removeCode(normCode) {
-            scannedList = scannedList.filter(c => normalize(c) !== normCode);
-            scannedSet.delete(normCode);
-            document.getElementById('count-text').textContent = 'Відскановано: ' + scannedList.length;
-            renderList();
-        }
-
-        function flashDuplicate(normCode) {
-            document.querySelectorAll('.code-item').forEach(item => {
-                if (item.dataset.code === normCode) {
-                    item.classList.add('duplicate-flash');
-                    item.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                    setTimeout(() => item.classList.remove('duplicate-flash'), 1000);
-                }
-            });
-        }
-
-        function flashCamError() {
-            const wrap = document.getElementById('cam-wrap');
-            wrap.classList.add('flash-error');
-            setTimeout(() => wrap.classList.remove('flash-error'), 500);
-        }
-
-        function handleScan(rawValues) {
-            const tokens = [];
-            for (const rv of rawValues) {
-                rv.split(/[\s,;]+/).forEach(t => {
-                    t = t.trim();
-                    if (t) tokens.push(t);
+                // Barcode Scan (Quagga) - Максимальний набір форматів
+                Quagga.decodeSingle({
+                    src: canvasElement.toDataURL(),
+                    decoder: { 
+                        readers: [
+                            "code_128_reader", 
+                            "ean_reader", 
+                            "ean_8_reader", 
+                            "code_39_reader", 
+                            "code_39_vin_reader", 
+                            "codabar_reader", 
+                            "upc_reader", 
+                            "upc_e_reader", 
+                            "i2of5_reader"
+                        ] 
+                    },
+                    locate: true
+                }, (result) => {
+                    if (result && result.codeResult) addCode(result.codeResult.code);
                 });
             }
-            if (tokens.length === 0) return;
-
-            let addedCount = 0;
-            let duplicates = [];
-            let links = 0;
-
-            tokens.forEach(sn => {
-                if (isUnwantedToken(sn)) { links++; return; }
-                const norm = normalize(sn);
-                if (!scannedSet.has(norm)) {
-                    scannedSet.add(norm);
-                    scannedList.push(sn);
-                    addedCount++;
-                } else {
-                    duplicates.push(norm);
-                }
-            });
-
-            const now = Date.now();
-
-            if (addedCount > 0) {
-                beep('ok');
-                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                document.getElementById('count-text').textContent = 'Відскановано: ' + scannedList.length;
-                document.getElementById('last-code').textContent = addedCount > 1
-                    ? '📦 Додано ' + addedCount + ' шт. пакетом'
-                    : '✅ ' + scannedList[scannedList.length - 1];
-                renderList();
-                return;
-            }
-
-            if (duplicates.length > 0 && now - lastDuplicateTime > 1500) {
-                lastDuplicateTime = now;
-                beep('err');
-                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                document.getElementById('last-code').textContent = '⚠️ Вже є у списку';
-                flashCamError();
-                flashDuplicate(duplicates[0]);
-                return;
-            }
-
-            if (links > 0 && now - lastLinkTime > 1500) {
-                lastLinkTime = now;
-                document.getElementById('last-code').textContent = '🔗 Посилання/текст пропущено';
-                if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-            }
         }
-
-        // ============ КАМЕРА ============
-        async function startCamera() {
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    audio: false,
-                    video: {
-                        facingMode: { ideal: 'environment' },
-                        width: { ideal: 1920 },
-                        height: { ideal: 1080 }
-                    }
-                });
-                video.srcObject = stream;
-                await video.play().catch(() => {});
-                return true;
-            } catch (err) {
-                showError('Не вдалося відкрити камеру:\n' + (err.message || err) +
-                    '\n\nПеревірте дозволи на камеру в налаштуваннях Telegram.');
-                return false;
-            }
-        }
-
-        // ============ ДИНАМІЧНЕ ЗАВАНТАЖЕННЯ СКРИПТА ============
-        function loadScript(src, timeoutMs = 6000) {
-            return new Promise((resolve, reject) => {
-                const script = document.createElement('script');
-                script.src = src;
-                script.async = true;
-                let settled = false;
-                const timer = setTimeout(() => {
-                    if (settled) return;
-                    settled = true;
-                    script.remove();
-                    reject(new Error('timeout: ' + src));
-                }, timeoutMs);
-                script.onload = () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timer);
-                    resolve();
-                };
-                script.onerror = () => {
-                    if (settled) return;
-                    settled = true;
-                    clearTimeout(timer);
-                    reject(new Error('error: ' + src));
-                };
-                document.head.appendChild(script);
-            });
-        }
-
-        // Пробуємо підвантажити по черзі з різних CDN
-        async function loadZXing() {
-            const cdnPairs = [
-                {
-                    lib: 'https://cdn.jsdelivr.net/npm/@zxing/[email protected]/umd/index.min.js',
-                    browser: 'https://cdn.jsdelivr.net/npm/@zxing/[email protected]/umd/index.min.js'
-                },
-                {
-                    lib: 'https://unpkg.com/@zxing/[email protected]/umd/index.min.js',
-                    browser: 'https://unpkg.com/@zxing/[email protected]/umd/index.min.js'
-                },
-                {
-                    lib: 'https://cdn.jsdelivr.net/npm/@zxing/library',
-                    browser: 'https://cdn.jsdelivr.net/npm/@zxing/browser'
-                },
-                {
-                    lib: 'https://unpkg.com/@zxing/library',
-                    browser: 'https://unpkg.com/@zxing/browser'
-                }
-            ];
-
-            for (let i = 0; i < cdnPairs.length; i++) {
-                const pair = cdnPairs[i];
-                loaderText.textContent = `Завантаження декодера (спроба ${i + 1}/${cdnPairs.length})…`;
-                try {
-                    await loadScript(pair.lib, 6000);
-                    await loadScript(pair.browser, 6000);
-                    if (window.ZXing && window.ZXingBrowser) {
-                        return true;
-                    }
-                } catch (e) {
-                    // пробуємо наступний CDN
-                }
-            }
-            return false;
-        }
-
-        // ============ РУШІЇ ============
-        async function startNativeDetector() {
-            hideLoader();
-            let formats = [
-                'qr_code','ean_13','ean_8',
-                'code_128','code_39','code_93',
-                'upc_a','upc_e','itf',
-                'data_matrix','pdf417','aztec','codabar'
-            ];
-            try {
-                const supported = await BarcodeDetector.getSupportedFormats();
-                if (supported && supported.length > 0) {
-                    formats = formats.filter(f => supported.includes(f));
-                    if (formats.length === 0) formats = supported;
-                }
-            } catch (e) {}
-
-            let detector;
-            try { detector = new BarcodeDetector({ formats }); }
-            catch (e) { detector = new BarcodeDetector(); }
-
-            badge.textContent = 'native';
-
-            const loop = async () => {
-                if (video.readyState >= 2) {
-                    try {
-                        const codes = await detector.detect(video);
-                        if (codes && codes.length > 0) {
-                            handleScan(codes.map(c => c.rawValue).filter(Boolean));
-                        }
-                    } catch (e) {}
-                }
-                setTimeout(() => requestAnimationFrame(loop), 100);
-            };
-            requestAnimationFrame(loop);
-        }
-
-        async function startZXing() {
-            loaderText.textContent = 'Завантаження декодера…';
-            const loaded = await loadZXing();
-            if (!loaded) {
-                showError('Не вдалося завантажити декодер.\nПеревірте інтернет-з\'єднання\nі відкрийте сканер ще раз.');
-                return;
-            }
-            hideLoader();
-
-            badge.textContent = 'zxing';
-
-            const hints = new Map();
-            try {
-                const formats = [
-                    ZXing.BarcodeFormat.QR_CODE,
-                    ZXing.BarcodeFormat.EAN_13,
-                    ZXing.BarcodeFormat.EAN_8,
-                    ZXing.BarcodeFormat.CODE_128,
-                    ZXing.BarcodeFormat.CODE_39,
-                    ZXing.BarcodeFormat.CODE_93,
-                    ZXing.BarcodeFormat.UPC_A,
-                    ZXing.BarcodeFormat.UPC_E,
-                    ZXing.BarcodeFormat.ITF,
-                    ZXing.BarcodeFormat.DATA_MATRIX,
-                    ZXing.BarcodeFormat.PDF_417,
-                    ZXing.BarcodeFormat.AZTEC,
-                    ZXing.BarcodeFormat.CODABAR
-                ];
-                hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, formats);
-                hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-            } catch (e) {}
-
-            const reader = new ZXingBrowser.BrowserMultiFormatReader(hints);
-            reader.decodeFromVideoElement(video, (result /*, err */) => {
-                if (result) handleScan([result.getText()]);
-            });
-        }
-
-        async function init() {
-            // Запускаємо камеру першою, щоб користувач бачив зображення ще поки вантажиться ZXing
-            const cameraOk = await startCamera();
-            if (!cameraOk) return;
-
-            if ('BarcodeDetector' in window) {
-                startNativeDetector();
-            } else {
-                startZXing();
-            }
-        }
-
-        init();
-
-        document.getElementById('send-btn').addEventListener('click', () => {
-            if (scannedList.length > 0) {
-                tg.sendData(scannedList.join('|'));
-            }
-        });
-    </script>
+        requestAnimationFrame(tick);
+    }
+    
+    updateUI();
+</script>
 </body>
 </html>
