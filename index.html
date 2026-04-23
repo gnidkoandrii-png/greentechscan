@@ -1,169 +1,172 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="uk">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Сканер — серійники з відправкою в бот</title>
-  <style>
-    :root{--bg:#fafafa;--accent:#1976d2}
-    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#111}
-    header{display:flex;align-items:center;gap:12px;padding:12px;background:#fff;border-bottom:1px solid #e6e6e6}
-    header h1{font-size:16px;margin:0}
-    .controls{margin-left:auto;display:flex;gap:8px;align-items:center}
-    #videoContainer{position:relative;background:#000;display:flex;align-items:center;justify-content:center;height:60vh;max-height:80vh}
-    video#video{width:100%;height:100%;object-fit:cover}
-    #overlayStatus{position:absolute;left:12px;top:12px;background:rgba(0,0,0,0.45);color:#fff;padding:6px 10px;border-radius:6px;font-size:14px}
-    #listWrap{padding:12px;max-height:30vh;overflow:auto;background:#fff;border-top:1px solid #e6e6e6}
-    .item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid #f0f0f0}
-    .code{font-family:monospace;color:#222}
-    button{background:var(--accent);color:#fff;border:0;padding:8px 10px;border-radius:6px;cursor:pointer}
-    button.secondary{background:#666}
-    select{padding:6px;border-radius:6px;border:1px solid #ccc}
-    .small{padding:6px 8px;font-size:13px}
-    .row{display:flex;gap:8px;align-items:center}
-    /* Модальне вікно */
-    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);z-index:999}
-    .modal.open{display:flex}
-    .modalCard{background:#fff;padding:16px;border-radius:8px;min-width:320px;max-width:90%}
-    .field{margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
-    input[type="text"], textarea{padding:8px;border:1px solid #ccc;border-radius:6px;width:100%}
-    .muted{font-size:13px;color:#666}
-    @media (max-width:600px){
-      header{flex-wrap:wrap}
-      #videoContainer{height:55vh}
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Greentech Pro Scanner</title>
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
+    <style>
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        #video-container { position: relative; width: 100%; height: 45vh; background: #000; }
+        video { width: 100%; height: 100%; object-fit: cover; }
+        .scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 140px; border: 2px solid #007bff; border-radius: 15px; box-shadow: 0 0 20px rgba(0,123,255,0.4); pointer-events: none; }
+        
+        .list-panel { flex-grow: 1; background: #121212; padding: 12px; display: flex; flex-direction: column; border-top: 2px solid #333; }
+        .counter { font-size: 18px; font-weight: bold; color: #007bff; text-align: center; margin-bottom: 10px; }
+        #codes-list { flex-grow: 1; overflow-y: auto; background: #000; border-radius: 10px; padding: 5px; border: 1px solid #222; }
+        
+        .code-item { 
+            background: #1c1c1c; margin-bottom: 6px; padding: 12px; border-radius: 8px;
+            display: flex; justify-content: space-between; align-items: center;
+            border-left: 4px solid #007bff; animation: slideIn 0.3s ease;
+        }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
+        
+        .remove-btn { color: #ff4d4d; font-size: 22px; font-weight: bold; padding: 5px 12px; cursor: pointer; }
+        
+        .footer-btns { padding-top: 12px; }
+        #send-btn { 
+            width: 100%; background: #28a745; color: white; border: none; 
+            padding: 18px; border-radius: 12px; font-size: 18px; font-weight: bold; 
+        }
+        #send-btn:disabled { background: #444; color: #888; }
+    </style>
 </head>
 <body>
-  <header>
-    <h1>Сканер штрих/QR кодів</h1>
-    <div class="controls">
-      <label for="cameraSelect">Камера</label>
-      <select id="cameraSelect"></select>
-      <button id="startBtn" class="small">Запустити</button>
-      <button id="stopBtn" class="small secondary" disabled>Зупинити</button>
-      <button id="fullscreenBtn" class="small secondary">Повноекранний</button>
+
+<div id="video-container">
+    <video id="video" playsinline></video>
+    <div class="scan-region"></div>
+</div>
+
+<div class="list-panel">
+    <div class="counter">📊 СКАНОВАНО: <span id="count">0</span> шт.</div>
+    <div id="codes-list"></div>
+    
+    <div class="footer-btns">
+        <button id="send-btn" onclick="sendToBot()" disabled>ВІДПРАВИТИ В БОТ (0)</button>
     </div>
-  </header>
+</div>
 
-  <main>
-    <div id="videoContainer">
-      <video id="video" muted playsinline></video>
-      <div id="overlayStatus">Готовий</div>
-    </div>
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
 
-    <div id="listWrap">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <strong>Список серійників</strong>
-        <div class="row">
-          <button id="sendBtn" class="small">Відправити в бот</button>
-          <button id="clearAll" class="small secondary">Очистити все</button>
-        </div>
-      </div>
-      <div id="list"></div>
-      <div id="sendStatus" class="muted" style="margin-top:8px"></div>
-    </div>
-  </main>
+    const video = document.getElementById('video');
+    const codesList = document.getElementById('codes-list');
+    const countDisplay = document.getElementById('count');
+    const sendBtn = document.getElementById('send-btn');
+    
+    let scannedCodes = [];
+    let throttleTimeout = false;
 
-  <!-- Модальне вікно для налаштування відправки -->
-  <div id="sendModal" class="modal" role="dialog" aria-modal="true">
-    <div class="modalCard">
-      <h3>Відправити серійники в бот</h3>
-      <div class="field">
-        <label><input type="radio" name="sendMethod" value="webhook" checked> Webhook (POST JSON)</label>
-        <label><input type="radio" name="sendMethod" value="telegram"> Telegram Bot</label>
-      </div>
+    function isValidCode(code) {
+        const text = code.trim();
+        
+        // 1. Ігноруємо посилання
+        if (/^(http|https|www|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(text)) return false;
+        
+        // 2. Ігноруємо, якщо в коді ТІЛЬКИ букви (немає жодної цифри)
+        if (!/\d/.test(text)) return false;
+        
+        // 3. Ігноруємо занадто короткі (менше 4 символів)
+        if (text.length < 4) return false;
 
-      <div id="webhookFields" class="field">
-        <label>Webhook URL</label>
-        <input id="webhookUrl" type="text" placeholder="https://example.com/webhook">
-        <div class="muted">Буде виконано POST з JSON: { "serials": ["A","B",...] }</div>
-      </div>
-
-      <div id="telegramFields" class="field" style="display:none">
-        <label>Bot Token</label>
-        <input id="tgToken" type="text" placeholder="123456:ABC-DEF...">
-        <label>Chat ID</label>
-        <input id="tgChatId" type="text" placeholder="123456789">
-        <div class="muted">Повідомлення буде відправлено через Telegram Bot API.</div>
-      </div>
-
-      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
-        <button id="modalSend" class="small">Відправити</button>
-        <button id="modalCancel" class="small secondary">Скасувати</button>
-      </div>
-      <div id="modalMsg" class="muted" style="margin-top:8px"></div>
-    </div>
-  </div>
-
-  <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
-  <script>
-    const codeReader = new ZXing.BrowserMultiFormatReader();
-    const videoElem = document.getElementById('video');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const fullscreenBtn = document.getElementById('fullscreenBtn');
-    const status = document.getElementById('overlayStatus');
-    const list = document.getElementById('list');
-    const cameraSelect = document.getElementById('cameraSelect');
-    const clearAllBtn = document.getElementById('clearAll');
-    const sendBtn = document.getElementById('sendBtn');
-    const sendStatus = document.getElementById('sendStatus');
-
-    const sendModal = document.getElementById('sendModal');
-    const webhookFields = document.getElementById('webhookFields');
-    const telegramFields = document.getElementById('telegramFields');
-    const webhookUrlInput = document.getElementById('webhookUrl');
-    const tgTokenInput = document.getElementById('tgToken');
-    const tgChatIdInput = document.getElementById('tgChatId');
-    const modalSend = document.getElementById('modalSend');
-    const modalCancel = document.getElementById('modalCancel');
-    const modalMsg = document.getElementById('modalMsg');
-
-    let decodeControls = null;
-    const serialSet = new Set();
-
-    function addSerial(serial) {
-      serial = String(serial).trim();
-      if (!serial) return false;
-      if (serialSet.has(serial)) {
-        status.textContent = `Дубль: ${serial} — не додано`;
-        return false;
-      }
-      serialSet.add(serial);
-      const row = document.createElement('div');
-      row.className = 'item';
-      row.dataset.code = serial;
-      const left = document.createElement('div');
-      left.className = 'code';
-      left.textContent = serial;
-      const right = document.createElement('div');
-      const del = document.createElement('button');
-      del.textContent = 'Видалити';
-      del.className = 'small secondary';
-      del.addEventListener('click', () => {
-        serialSet.delete(serial);
-        row.remove();
-      });
-      right.appendChild(del);
-      row.appendChild(left);
-      row.appendChild(right);
-      list.prepend(row);
-      status.textContent = `Додано: ${serial}`;
-      return true;
+        return true;
     }
 
-    function parseAndAdd(text) {
-      if (!text) return;
-      let candidates = [];
-      try {
-        const maybe = JSON.parse(text);
-        if (Array.isArray(maybe)) {
-          candidates = maybe.map(String);
-        } else if (typeof maybe === 'object' && maybe !== null) {
-          for (const k of Object.keys(maybe)) {
-            if (Array.isArray(maybe[k])) {
-              candidates = maybe[k].map(String);
-              break;
-            } else if (typeof maybe[k] === 'string' && maybe[k].match(/[,;\n]/)) {
-              candidates = maybe
+    function addCode(code) {
+        if (throttleTimeout || scannedCodes.includes(code)) return;
+        if (!isValidCode(code)) return;
+
+        scannedCodes.unshift(code);
+        updateUI();
+
+        if (navigator.vibrate) navigator.vibrate(50);
+
+        throttleTimeout = true;
+        setTimeout(() => { throttleTimeout = false; }, 1300);
+    }
+
+    function removeCode(index) {
+        scannedCodes.splice(index, 1);
+        updateUI();
+    }
+
+    function updateUI() {
+        const len = scannedCodes.length;
+        countDisplay.innerText = len;
+        sendBtn.innerText = `ВІДПРАВИТИ В БОТ (${len})`;
+        sendBtn.disabled = len === 0;
+        
+        if (len === 0) {
+            codesList.innerHTML = "<div style='text-align:center; padding:30px; color:#444;'>Очікування штрих-коду...</div>";
+            return;
+        }
+
+        codesList.innerHTML = scannedCodes.map((code, index) => `
+            <div class="code-item">
+                <span style="font-family: monospace; font-size: 16px;">${code}</span>
+                <span class="remove-btn" onclick="removeCode(${index})">✕</span>
+            </div>
+        `).join("");
+    }
+
+    function sendToBot() {
+        if (scannedCodes.length > 0) {
+            tg.sendData(scannedCodes.join("|"));
+            tg.close();
+        }
+    }
+
+    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
+        video.srcObject = stream;
+        video.play();
+        requestAnimationFrame(tick);
+    });
+
+    function tick() {
+        if (video.readyState === video.HAVE_ENOUGH_DATA && !throttleTimeout) {
+            const canvasElement = document.createElement("canvas");
+            const canvas = canvasElement.getContext("2d");
+            canvasElement.height = video.videoHeight;
+            canvasElement.width = video.videoWidth;
+            canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
+            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
+
+            // QR Scan (jsQR)
+            const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
+            if (qrCode) {
+                addCode(qrCode.data);
+            } else {
+                // Barcode Scan (Quagga) - Максимальний набір форматів
+                Quagga.decodeSingle({
+                    src: canvasElement.toDataURL(),
+                    decoder: { 
+                        readers: [
+                            "code_128_reader", 
+                            "ean_reader", 
+                            "ean_8_reader", 
+                            "code_39_reader", 
+                            "code_39_vin_reader", 
+                            "codabar_reader", 
+                            "upc_reader", 
+                            "upc_e_reader", 
+                            "i2of5_reader"
+                        ] 
+                    },
+                    locate: true
+                }, (result) => {
+                    if (result && result.codeResult) addCode(result.codeResult.code);
+                });
+            }
+        }
+        requestAnimationFrame(tick);
+    }
+    
+    updateUI();
+</script>
+</body>
+</html>
