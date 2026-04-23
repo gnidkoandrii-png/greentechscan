@@ -103,22 +103,20 @@
 
         const html5QrCode = new Html5Qrcode("reader");
         
-        // --- СУПЕР ОПТИМІЗАЦІЯ ---
         const config = { 
-            fps: 30, // Максимальна швидкість сканування
+            fps: 30, 
             qrbox: function(vw, vh) { 
-                // Широка рамка (90% екрану), але не дуже висока (150px)
-                // Це ідеально для довгих штрих-кодів Deye та достатньо для QR
-                return { width: vw * 0.9, height: 150 }; 
+                // ЗРОБИВ ЧІТКИЙ ПРЯМОКУТНИК
+                // Ширина на 90% екрану, висота фіксована - 120px. 
+                return { width: vw * 0.9, height: 120 }; 
             },
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true }, // iOS прискорювач
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true }, 
             videoConstraints: {
                 facingMode: "environment",
-                width: { ideal: 1920 }, // Примусове HD для чіткості тонких смужок
+                width: { ideal: 1920 }, 
                 height: { ideal: 1080 }
             },
             formatsToSupport: [ 
-                // ЗАЛИШИЛИ ТІЛЬКИ ТЕ, ЩО РЕАЛЬНО Є НА ТВОЇХ ФОТО!
                 Html5QrcodeSupportedFormats.QR_CODE,
                 Html5QrcodeSupportedFormats.CODE_128 
             ]
