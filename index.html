@@ -5,28 +5,65 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <!-- ЗАФІКСОВАНА ВЕРСІЯ: більше не буде "само поламалось" при оновленні бібліотеки -->
     <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
-        body {
-            background: #18222d; color: white; text-align: center;
-            margin: 0; padding: 0; font-family: sans-serif;
-            display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+        * { box-sizing: border-box; }
+
+        html, body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
         }
 
-        /* Камера — фіксована висота (40% екрану), щоб список під нею мав місце */
+        body {
+            background: #18222d;
+            color: white;
+            text-align: center;
+            font-family: sans-serif;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* КАМЕРА — жорстко зафіксована висота через !important,
+           щоб html5-qrcode не міг перетворити її на fullscreen */
         #reader {
-            width: 100%;
-            height: 40vh;
-            background: #000;
-            box-sizing: border-box;
-            border-bottom: 3px solid #2ea6ff;
-            transition: border 0.2s, box-shadow 0.2s;
+            width: 100% !important;
+            height: 40vh !important;
+            max-height: 40vh !important;
+            min-height: 40vh !important;
+            background: #000 !important;
+            border: 0 !important;
+            border-bottom: 3px solid #2ea6ff !important;
+            padding: 0 !important;
+            position: relative !important;
+            overflow: hidden !important;
+            flex-shrink: 0;
+        }
+
+        /* Відео та канвас всередині теж мають не вилазити */
+        #reader video,
+        #reader canvas,
+        #reader img {
+            width: 100% !important;
+            height: 100% !important;
+            max-height: 40vh !important;
+            object-fit: cover !important;
+        }
+
+        /* Прибрати стандартні кнопки бібліотеки (торч, вибір камери), якщо з'являються */
+        #reader__dashboard,
+        #reader__dashboard_section,
+        #reader__dashboard_section_csr,
+        #reader__header_message,
+        #reader__status_span,
+        #reader__filescan_input {
+            display: none !important;
         }
 
         .error-flash {
-            border: 6px solid #ff3b30 !important;
-            box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.8);
+            box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.8) !important;
+            border-bottom: 6px solid #ff3b30 !important;
         }
 
         /* Лічильник */
@@ -34,17 +71,20 @@
             padding: 8px 15px;
             background: #18222d;
             border-bottom: 1px solid #2a3a4d;
+            flex-shrink: 0;
         }
         .stats h2 { color: #4caf50; margin: 0 0 3px 0; font-size: 18px; }
         .stats p { color: #aaa; margin: 0; font-size: 13px; }
 
-        /* Список відсканованих кодів — скролиться */
+        /* Список кодів */
         #codes-list {
-            flex-grow: 1;
+            flex: 1 1 auto;
             overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
             padding: 8px 12px;
             background: #0f1720;
             text-align: left;
+            min-height: 0;
         }
         .code-item {
             display: flex;
@@ -89,6 +129,7 @@
             width: 92%; margin: 8px auto 50px auto;
             display: none; font-weight: bold;
             box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            flex-shrink: 0;
         }
     </style>
 </head>
@@ -110,12 +151,11 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
 
-        // Масив для збереження порядку + Set для швидкої перевірки унікальності
         let scannedList = [];
         let scannedSet = new Set();
         let lastErrorTime = 0;
 
-        // --- ГЕНЕРАТОР ЗВУКІВ ---
+        // --- ЗВУКИ ---
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioContext();
 
@@ -143,7 +183,7 @@
             }
         }
 
-        // --- ОНОВЛЕННЯ СПИСКУ НА ЕКРАНІ ---
+        // --- ОНОВЛЕННЯ СПИСКУ ---
         function renderList() {
             const listDiv = document.getElementById('codes-list');
 
@@ -166,13 +206,10 @@
                 listDiv.appendChild(item);
             });
 
-            // Автопрокрутка вниз, щоб було видно останній доданий
             listDiv.scrollTop = listDiv.scrollHeight;
-
             document.getElementById('send-btn').style.display = 'block';
         }
 
-        // Видалення коду зі списку (якщо випадково відсканували зайве)
         function removeCode(code) {
             scannedList = scannedList.filter(c => c !== code);
             scannedSet.delete(code);
@@ -180,7 +217,6 @@
             renderList();
         }
 
-        // Підсвітити існуючий код червоним (при скануванні дубля)
         function flashDuplicate(code) {
             const items = document.querySelectorAll('.code-item');
             items.forEach(item => {
@@ -191,9 +227,8 @@
                 }
             });
         }
-        // -----------------------
 
-        // ЯВНО вказуємо формати, які потрібні складу
+        // --- ФОРМАТИ ---
         const formatsToSupport = [
             Html5QrcodeSupportedFormats.QR_CODE,
             Html5QrcodeSupportedFormats.EAN_13,
@@ -207,19 +242,27 @@
             Html5QrcodeSupportedFormats.DATA_MATRIX
         ];
 
-        const html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formatsToSupport });
+        const html5QrCode = new Html5Qrcode("reader", {
+            formatsToSupport: formatsToSupport,
+            verbose: false
+        });
 
         const config = {
             fps: 10,
-            qrbox: function(vw, vh) { return { width: vw * 0.85, height: Math.min(vh * 0.7, 250) }; },
+            qrbox: function(vw, vh) {
+                return {
+                    width: Math.min(vw * 0.85, 400),
+                    height: Math.min(vh * 0.6, 200)
+                };
+            },
+            aspectRatio: 1.777,
             videoConstraints: {
                 facingMode: { ideal: "environment" },
                 width: { ideal: 1920 },
                 height: { ideal: 1080 },
                 advanced: [{ focusMode: "continuous" }]
             },
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
-            rememberLastUsedCamera: true
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true }
         };
 
         html5QrCode.start(
@@ -249,7 +292,6 @@
 
                 let now = Date.now();
 
-                // НОВІ КОДИ ДОДАНО
                 if (addedCount > 0) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
@@ -265,7 +307,6 @@
                     renderList();
                 }
 
-                // ВСІ КОДИ — ДУБЛІ (і минуло більше 2 сек від попередньої помилки)
                 if (addedCount === 0 && duplicateCodes.length > 0 && (now - lastErrorTime > 2000)) {
                     lastErrorTime = now;
                     playSound('error');
@@ -273,7 +314,6 @@
 
                     document.getElementById('last-code').innerText = "⚠️ Вже є: " + duplicateCodes[0];
 
-                    // Миготіти камерою і підсвітити рядок у списку
                     let readerDiv = document.getElementById('reader');
                     readerDiv.classList.add('error-flash');
                     setTimeout(() => readerDiv.classList.remove('error-flash'), 500);
@@ -288,7 +328,6 @@
 
         function sendData() {
             if (scannedList.length > 0) {
-                // Порядок зберігається: передаємо у тому ж порядку, в якому сканували
                 tg.sendData(scannedList.join('|'));
             }
         }
