@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Greentech Multi-Scanner</title>
+    <title>Greentech Pro Scanner</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
@@ -11,25 +11,27 @@
         body { margin: 0; background: #000; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         #video-container { position: relative; width: 100%; height: 45vh; background: #000; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        .scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 260px; height: 120px; border: 2px solid #ffff00; border-radius: 15px; box-shadow: 0 0 15px rgba(255,255,0,0.3); pointer-events: none; }
+        .scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 140px; border: 2px solid #007bff; border-radius: 15px; box-shadow: 0 0 20px rgba(0,123,255,0.4); pointer-events: none; }
         
-        .list-panel { flex-grow: 1; background: #1a1a1a; padding: 10px; display: flex; flex-direction: column; border-top: 2px solid #333; }
-        .counter { font-size: 18px; font-weight: bold; color: #ffff00; text-align: center; margin-bottom: 8px; }
-        #codes-list { flex-grow: 1; overflow-y: auto; background: #080808; border-radius: 8px; padding: 5px; font-size: 15px; border: 1px solid #333; }
+        .list-panel { flex-grow: 1; background: #121212; padding: 12px; display: flex; flex-direction: column; border-top: 2px solid #333; }
+        .counter { font-size: 18px; font-weight: bold; color: #007bff; text-align: center; margin-bottom: 10px; }
+        #codes-list { flex-grow: 1; overflow-y: auto; background: #000; border-radius: 10px; padding: 5px; border: 1px solid #222; }
         
         .code-item { 
-            background: #222; margin-bottom: 5px; padding: 10px; border-radius: 6px;
+            background: #1c1c1c; margin-bottom: 6px; padding: 12px; border-radius: 8px;
             display: flex; justify-content: space-between; align-items: center;
-            border-left: 4px solid #28a745;
+            border-left: 4px solid #007bff; animation: slideIn 0.3s ease;
         }
-        .remove-btn { 
-            color: #ff4d4d; font-size: 20px; font-weight: bold; padding: 0 10px; cursor: pointer;
-        }
+        @keyframes slideIn { from { opacity: 0; transform: translateX(-10px); } to { opacity: 1; transform: translateX(0); } }
         
-        .footer-btns { display: flex; gap: 10px; padding-top: 10px; }
-        button { flex: 1; padding: 15px; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; }
-        #send-btn { background: #28a745; color: white; }
-        #clear-btn { background: #444; color: white; flex: 0.3; }
+        .remove-btn { color: #ff4d4d; font-size: 22px; font-weight: bold; padding: 5px 12px; cursor: pointer; }
+        
+        .footer-btns { padding-top: 12px; }
+        #send-btn { 
+            width: 100%; background: #28a745; color: white; border: none; 
+            padding: 18px; border-radius: 12px; font-size: 18px; font-weight: bold; 
+        }
+        #send-btn:disabled { background: #444; color: #888; }
     </style>
 </head>
 <body>
@@ -40,12 +42,11 @@
 </div>
 
 <div class="list-panel">
-    <div class="counter">📦 Зібрано: <span id="count">0</span> шт.</div>
-    <div id="codes-list">Список порожній...</div>
+    <div class="counter">📊 СКАНОВАНО: <span id="count">0</span> шт.</div>
+    <div id="codes-list"></div>
     
     <div class="footer-btns">
-        <button id="clear-btn" onclick="clearList()">🗑</button>
-        <button id="send-btn" onclick="sendToBot()">✅ ВІДПРАВИТИ (<span id="btn-count">0</span>)</button>
+        <button id="send-btn" onclick="sendToBot()" disabled>ВІДПРАВИТИ В БОТ (0)</button>
     </div>
 </div>
 
@@ -56,25 +57,37 @@
     const video = document.getElementById('video');
     const codesList = document.getElementById('codes-list');
     const countDisplay = document.getElementById('count');
-    const btnCountDisplay = document.getElementById('btn-count');
+    const sendBtn = document.getElementById('send-btn');
     
-    let scannedCodes = []; // Використовуємо масив для збереження черговості
+    let scannedCodes = [];
     let throttleTimeout = false;
+
+    function isValidCode(code) {
+        const text = code.trim();
+        
+        // 1. Ігноруємо посилання
+        if (/^(http|https|www|ftp):\/\/[^\s/$.?#].[^\s]*$/i.test(text)) return false;
+        
+        // 2. Ігноруємо, якщо в коді ТІЛЬКИ букви (немає жодної цифри)
+        if (!/\d/.test(text)) return false;
+        
+        // 3. Ігноруємо занадто короткі (менше 4 символів)
+        if (text.length < 4) return false;
+
+        return true;
+    }
 
     function addCode(code) {
         if (throttleTimeout || scannedCodes.includes(code)) return;
-        
-        // Ігноруємо посилання та пусті рядки
-        if (/^(http|https|www)/i.test(code.trim()) || code.length < 3) return;
+        if (!isValidCode(code)) return;
 
-        scannedCodes.unshift(code); // Додаємо новий код на початок списку
+        scannedCodes.unshift(code);
         updateUI();
 
-        if (navigator.vibrate) navigator.vibrate(40);
+        if (navigator.vibrate) navigator.vibrate(50);
 
-        // Пауза 1.2 сек між скануваннями
         throttleTimeout = true;
-        setTimeout(() => { throttleTimeout = false; }, 1200);
+        setTimeout(() => { throttleTimeout = false; }, 1300);
     }
 
     function removeCode(index) {
@@ -83,46 +96,35 @@
     }
 
     function updateUI() {
-        countDisplay.innerText = scannedCodes.length;
-        btnCountDisplay.innerText = scannedCodes.length;
+        const len = scannedCodes.length;
+        countDisplay.innerText = len;
+        sendBtn.innerText = `ВІДПРАВИТИ В БОТ (${len})`;
+        sendBtn.disabled = len === 0;
         
-        if (scannedCodes.length === 0) {
-            codesList.innerHTML = "<div style='text-align:center; padding:20px; color:#555;'>Наведіть камеру на штрих-код...</div>";
+        if (len === 0) {
+            codesList.innerHTML = "<div style='text-align:center; padding:30px; color:#444;'>Очікування штрих-коду...</div>";
             return;
         }
 
         codesList.innerHTML = scannedCodes.map((code, index) => `
             <div class="code-item">
-                <span><code>${code}</code></span>
-                <span class="remove-btn" onclick="removeCode(${index})">✖</span>
+                <span style="font-family: monospace; font-size: 16px;">${code}</span>
+                <span class="remove-btn" onclick="removeCode(${index})">✕</span>
             </div>
         `).join("");
     }
 
-    function clearList() {
-        if (scannedCodes.length > 0 && confirm("Очистити весь список?")) {
-            scannedCodes = [];
-            updateUI();
-        }
-    }
-
     function sendToBot() {
-        if (scannedCodes.length === 0) {
-            alert("Список порожній!");
-            return;
+        if (scannedCodes.length > 0) {
+            tg.sendData(scannedCodes.join("|"));
+            tg.close();
         }
-        // Відправляємо коди боту через розділювач |
-        tg.sendData(scannedCodes.join("|"));
-        tg.close();
     }
 
-    // Запуск камери
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
         video.srcObject = stream;
         video.play();
         requestAnimationFrame(tick);
-    }).catch(function(err) {
-        alert("Помилка доступу до камери: " + err);
     });
 
     function tick() {
@@ -134,15 +136,27 @@
             canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
             const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
 
-            // 1. QR-код
+            // QR Scan (jsQR)
             const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
             if (qrCode) {
                 addCode(qrCode.data);
             } else {
-                // 2. Штрих-код
+                // Barcode Scan (Quagga) - Максимальний набір форматів
                 Quagga.decodeSingle({
                     src: canvasElement.toDataURL(),
-                    decoder: { readers: ["code_128_reader", "ean_reader", "code_39_reader"] },
+                    decoder: { 
+                        readers: [
+                            "code_128_reader", 
+                            "ean_reader", 
+                            "ean_8_reader", 
+                            "code_39_reader", 
+                            "code_39_vin_reader", 
+                            "codabar_reader", 
+                            "upc_reader", 
+                            "upc_e_reader", 
+                            "i2of5_reader"
+                        ] 
+                    },
                     locate: true
                 }, (result) => {
                     if (result && result.codeResult) addCode(result.codeResult.code);
@@ -151,7 +165,8 @@
         }
         requestAnimationFrame(tick);
     }
+    
+    updateUI();
 </script>
-
 </body>
 </html>
