@@ -27,7 +27,6 @@
             flex-direction: column;
         }
 
-        /* Блок камери — висота виставляється JS-ом у пікселях */
         #reader {
             width: 100% !important;
             background: #000 !important;
@@ -39,7 +38,6 @@
             flex-shrink: 0;
         }
 
-        /* Відео/канвас ОБМЕЖЕНІ рамками #reader */
         #reader video,
         #reader canvas,
         #reader img {
@@ -51,7 +49,6 @@
             left: 0 !important;
         }
 
-        /* Приховуємо службові елементи html5-qrcode */
         #reader__dashboard,
         #reader__dashboard_section,
         #reader__dashboard_section_csr,
@@ -77,7 +74,6 @@
         .stats h2 { color: #4caf50; margin: 0 0 3px 0; font-size: 18px; }
         .stats p { color: #aaa; margin: 0; font-size: 13px; }
 
-        /* Список — тільки він скролиться */
         #codes-list {
             flex: 1 1 auto;
             overflow-y: auto;
@@ -152,29 +148,24 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
 
-        // --- ГОЛОВНИЙ ФІКС: розраховуємо висоту камери В ПІКСЕЛЯХ ---
-        // і стежимо за змінами viewport від Telegram
+        // --- МАКЕТ ---
         function updateLayout() {
             const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
-            const cameraHeight = Math.round(vh * 0.40); // 40% від видимої висоти
+            const cameraHeight = Math.round(vh * 0.40);
 
             const reader = document.getElementById('reader');
             reader.style.height = cameraHeight + 'px';
             reader.style.maxHeight = cameraHeight + 'px';
             reader.style.minHeight = cameraHeight + 'px';
 
-            // Body теж жорстко прив'язуємо до висоти viewport
             document.body.style.height = vh + 'px';
         }
 
         updateLayout();
-        // Telegram присилає події, коли меню розгорнулось/згорнулось
         tg.onEvent('viewportChanged', updateLayout);
         window.addEventListener('resize', updateLayout);
         window.addEventListener('orientationchange', () => setTimeout(updateLayout, 300));
 
-        // ПОСТІЙНО стежимо за тим, щоб html5-qrcode не переписала розмір #reader.
-        // Якщо бібліотека задає inline-стиль — повертаємо наш.
         const reader = document.getElementById('reader');
         const observer = new MutationObserver(() => {
             const vh = (tg.viewportStableHeight || tg.viewportHeight || window.innerHeight);
@@ -185,11 +176,55 @@
         });
         observer.observe(reader, { attributes: true, attributeFilter: ['style'] });
 
-        // ---------- логіка сканування ----------
-        let scannedList = [];
-        let scannedSet = new Set();
+        // --- ЛОГІКА СКАНУВАННЯ ---
+        let scannedList = [];      // оригінальні значення (як сканували)
+        let scannedSet = new Set(); // нормалізовані, для перевірки дублів
         let lastErrorTime = 0;
 
+        // Нормалізація для порівняння: без пробілів, верхній регістр
+        function normalize(code) {
+            return code.replace(/\s+/g, '').toUpperCase();
+        }
+
+        // Визначає, чи є токен "службовим" (посилання, Wi-Fi, vCard і т.д.)
+        function isUnwantedToken(sn) {
+            if (!sn) return true;
+            if (sn.length < 4) return true;
+
+            // У штрих/серійному коді зазвичай є хоча б одна цифра.
+            // Якщо самі букви/символи — це, скоріше за все, текст/посилання.
+            if (!/\d/.test(sn)) return true;
+
+            const lower = sn.toLowerCase();
+
+            // Посилання і службові URI
+            const urlSchemes = [
+                'http://', 'https://', 'ftp://', 'ftps://',
+                'mailto:', 'tel:', 'sms:', 'smsto:',
+                'geo:', 'maps:',
+                'wifi:', 'matmsg:', 'bitcoin:',
+                'viber://', 'tg://', 'whatsapp://'
+            ];
+            for (const scheme of urlSchemes) {
+                if (lower.startsWith(scheme)) return true;
+            }
+
+            // vCard / MECARD
+            if (/^begin:(vcard|vcalendar)/i.test(sn)) return true;
+            if (/^mecard:/i.test(sn)) return true;
+
+            // Явний www
+            if (/^www\./i.test(sn)) return true;
+
+            // Домен (щось типу bit.ly/xyz, t.me/abc, example.com/...)
+            // Формула: є крапка між літерами/цифрами + доменне закінчення з 2-6 літер + слеш/кінець
+            if (/^[a-z0-9][a-z0-9-]*(\.[a-z0-9-]+)+\/\S*/i.test(sn)) return true;
+            if (/^[a-z0-9][a-z0-9-]*\.(com|ua|net|org|io|me|ly|gg|ru|info|biz|app|dev|co|tv|cc|xyz|site|shop|store|online|link)(\/|$)/i.test(sn)) return true;
+
+            return false;
+        }
+
+        // --- ЗВУКИ ---
         const AudioContext = window.AudioContext || window.webkitAudioContext;
         const audioCtx = new AudioContext();
 
@@ -228,28 +263,34 @@
             scannedList.forEach((code, idx) => {
                 const item = document.createElement('div');
                 item.className = 'code-item';
-                item.dataset.code = code;
+                item.dataset.code = normalize(code);
                 item.innerHTML = `
                     <span class="code-num">${idx + 1}.</span>
                     <span class="code-text">${code}</span>
-                    <button class="code-remove" onclick="removeCode('${code.replace(/'/g, "\\'")}')">×</button>
+                    <button class="code-remove" data-code="${normalize(code).replace(/"/g,'&quot;')}">×</button>
                 `;
                 listDiv.appendChild(item);
+            });
+            // Прив'язуємо обробники на кнопки видалення (без inline-onclick, безпечніше)
+            listDiv.querySelectorAll('.code-remove').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    removeCodeByNormalized(e.currentTarget.dataset.code);
+                });
             });
             listDiv.scrollTop = listDiv.scrollHeight;
             document.getElementById('send-btn').style.display = 'block';
         }
 
-        function removeCode(code) {
-            scannedList = scannedList.filter(c => c !== code);
-            scannedSet.delete(code);
+        function removeCodeByNormalized(normCode) {
+            scannedList = scannedList.filter(c => normalize(c) !== normCode);
+            scannedSet.delete(normCode);
             document.getElementById('count-text').innerText = "Відскановано: " + scannedList.length;
             renderList();
         }
 
-        function flashDuplicate(code) {
+        function flashDuplicate(normCode) {
             document.querySelectorAll('.code-item').forEach(item => {
-                if (item.dataset.code === code) {
+                if (item.dataset.code === normCode) {
                     item.classList.add('duplicate-flash');
                     item.scrollIntoView({ behavior: 'smooth', block: 'center' });
                     setTimeout(() => item.classList.remove('duplicate-flash'), 1000);
@@ -257,6 +298,7 @@
             });
         }
 
+        // --- ФОРМАТИ ---
         const formatsToSupport = [
             Html5QrcodeSupportedFormats.QR_CODE,
             Html5QrcodeSupportedFormats.EAN_13,
@@ -267,7 +309,10 @@
             Html5QrcodeSupportedFormats.UPC_A,
             Html5QrcodeSupportedFormats.UPC_E,
             Html5QrcodeSupportedFormats.ITF,
-            Html5QrcodeSupportedFormats.DATA_MATRIX
+            Html5QrcodeSupportedFormats.DATA_MATRIX,
+            Html5QrcodeSupportedFormats.PDF_417,
+            Html5QrcodeSupportedFormats.AZTEC,
+            Html5QrcodeSupportedFormats.CODABAR
         ];
 
         const html5QrCode = new Html5Qrcode("reader", {
@@ -296,50 +341,72 @@
             { facingMode: { ideal: "environment" } },
             config,
             (decodedText) => {
-                let serials = decodedText.split(/\s+/);
+                // Розділяємо по будь-яких пробілах/переносах/табах/комах/крапках з комою
+                let tokens = decodedText.split(/[\s,;]+/);
+
                 let addedCount = 0;
-                let duplicateCodes = [];
+                let duplicateNormCodes = [];
+                let allWereLinks = tokens.every(t => {
+                    const tt = t.trim();
+                    return tt && isUnwantedToken(tt);
+                });
 
-                serials.forEach(sn => {
+                tokens.forEach(sn => {
                     sn = sn.trim();
-                    if (/^https?:\/\/|www\./i.test(sn)) return;
-                    if (!/\d/.test(sn)) return;
-                    if (sn.length < 4) return;
+                    if (isUnwantedToken(sn)) return;
 
-                    if (sn) {
-                        if (!scannedSet.has(sn)) {
-                            scannedSet.add(sn);
-                            scannedList.push(sn);
-                            addedCount++;
-                        } else {
-                            duplicateCodes.push(sn);
-                        }
+                    const norm = normalize(sn);
+                    if (!scannedSet.has(norm)) {
+                        scannedSet.add(norm);
+                        scannedList.push(sn);
+                        addedCount++;
+                    } else {
+                        duplicateNormCodes.push(norm);
                     }
                 });
 
                 let now = Date.now();
 
+                // Новий код(и) додано
                 if (addedCount > 0) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+
                     document.getElementById('count-text').innerText = "Відскановано: " + scannedList.length;
+
                     if (addedCount > 1) {
                         document.getElementById('last-code').innerText = `📦 Додано ${addedCount} шт. пакетом`;
                     } else {
                         document.getElementById('last-code').innerText = "✅ " + scannedList[scannedList.length - 1];
                     }
                     renderList();
+                    return;
                 }
 
-                if (addedCount === 0 && duplicateCodes.length > 0 && (now - lastErrorTime > 2000)) {
+                // Нічого не додано — або все дублі, або все посилання
+                if (addedCount === 0 && now - lastErrorTime > 2000) {
                     lastErrorTime = now;
-                    playSound('error');
-                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                    document.getElementById('last-code').innerText = "⚠️ Вже є: " + duplicateCodes[0];
-                    let readerDiv = document.getElementById('reader');
-                    readerDiv.classList.add('error-flash');
-                    setTimeout(() => readerDiv.classList.remove('error-flash'), 500);
-                    flashDuplicate(duplicateCodes[0]);
+
+                    // Якщо усе виявилось посиланнями — показуємо м'яке повідомлення без гучної помилки
+                    if (allWereLinks && tokens.length > 0) {
+                        document.getElementById('last-code').innerText = "🔗 Посилання пропущено";
+                        // тихий короткий сигнал
+                        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+                        return;
+                    }
+
+                    // Інакше це дубль(і) — звук помилки + мигання
+                    if (duplicateNormCodes.length > 0) {
+                        playSound('error');
+                        if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+                        document.getElementById('last-code').innerText = "⚠️ Вже є у списку";
+
+                        let readerDiv = document.getElementById('reader');
+                        readerDiv.classList.add('error-flash');
+                        setTimeout(() => readerDiv.classList.remove('error-flash'), 500);
+
+                        flashDuplicate(duplicateNormCodes[0]);
+                    }
                 }
             },
             (errorMessage) => {}
@@ -347,8 +414,6 @@
             document.getElementById('last-code').innerText = "Помилка камери: " + err;
         });
 
-        // Після старту камери ще раз виправляємо розмір — бібліотека зазвичай
-        // переписує висоту саме в момент запуску відео
         setTimeout(updateLayout, 500);
         setTimeout(updateLayout, 1500);
         setTimeout(updateLayout, 3000);
