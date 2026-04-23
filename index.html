@@ -2,16 +2,16 @@
 <html lang="uk">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         body { background: #18222d; color: white; text-align: center; margin: 0; padding: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
-        /* КОНТЕЙНЕР КАМЕРИ: Більше ніякого сплющення */
-        #reader-wrapper { width: 100%; max-height: 50vh; overflow: hidden; background: #000; border-bottom: 3px solid #2ea6ff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
-        #reader { width: 100%; } 
+        /* КОНТЕЙНЕР КАМЕРИ: Максимальна висота, щоб не заважати списку */
+        #reader-wrapper { width: 100%; height: 50vh; overflow: hidden; background: #000; border-bottom: 3px solid #2ea6ff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; }
+        #reader { width: 100%; height: 100%; object-fit: cover; } 
         
         /* Червона рамка при помилці */
         .error-flash { border-bottom: 6px solid #ff3b30 !important; box-shadow: inset 0 -10px 30px rgba(255, 59, 48, 0.6); }
@@ -116,18 +116,23 @@
 
         const html5QrCode = new Html5Qrcode("reader");
         
-        // --- ВИПРАВЛЕНА КАМЕРА ТА РАМКА ---
+        // --- ІДЕАЛЬНА КВАДРАТНА РАМКА ---
         const config = { 
-            fps: 20, 
-            // Фіксуємо висоту рамки на 120px, щоб вона не була "щілиною"
-            qrbox: function(vw, vh) { return { width: vw * 0.85, height: 130 }; },
-            aspectRatio: 1.0, // Просимо бібліотеку зробити рівний квадрат без спотворень
-            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+            fps: 25, // Трохи прискорили для плавності
+            // РОЗРАХУНОК КВАДРАТА: Беремо 80% ширини екрана і для ширини, і для висоти рамки
+            qrbox: function(vw, vh) { 
+                let size = Math.min(vw, vh) * 0.8; 
+                // Обмежуємо максимальний розмір, щоб на великих екранах рамка не була занадто величезною
+                let maxSize = 350; 
+                if (size > maxSize) size = maxSize;
+                return { width: size, height: size }; 
+            },
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true }, // Нативне прискорення iOS
             formatsToSupport: [ 
                 Html5QrcodeSupportedFormats.QR_CODE,
                 Html5QrcodeSupportedFormats.DATA_MATRIX,
                 Html5QrcodeSupportedFormats.PDF_417,
-                Html5QrcodeSupportedFormats.CODE_128, 
+                Html5QrcodeSupportedFormats.CODE_128, // Для наклейок з фото №5
                 Html5QrcodeSupportedFormats.CODE_39, 
                 Html5QrcodeSupportedFormats.CODE_93,
                 Html5QrcodeSupportedFormats.EAN_13,
@@ -143,7 +148,7 @@
             { facingMode: "environment" }, 
             config,
             (decodedText) => {
-                let serials = decodedText.split(/[\s,;|\n\r]+/); 
+                let serials = decodedText.split(/[\s,;|\n\r]+/); // Розрізає пакетні QR-коди (на 36 шт)
                 let addedAny = false;
                 let hasDuplicates = false;
 
@@ -155,7 +160,7 @@
 
                     if (sn) {
                         if (!scannedCodes.includes(sn)) {
-                            scannedCodes.unshift(sn); 
+                            scannedCodes.unshift(sn); // Додаємо на самий верх списку
                             addedAny = true;
                         } else {
                             hasDuplicates = true;
@@ -165,11 +170,13 @@
 
                 let now = Date.now();
 
+                // ЯКЩО ДОДАНО НОВИЙ КОД:
                 if (addedAny) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                    updateList(); 
+                    updateList(); // Оновлюємо список на екрані
                 } 
+                // ЯКЩО КОД ВЖЕ БУВ:
                 else if (hasDuplicates && (now - lastErrorTime > 2000)) {
                     lastErrorTime = now;
                     playSound('error');
@@ -193,6 +200,9 @@
                 tg.close();
             }
         }
+        
+        // Ініціалізація списку при завантаженні сторінки
+        updateList();
     </script>
 </body>
 </html>
