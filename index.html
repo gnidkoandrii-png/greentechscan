@@ -9,31 +9,53 @@
     <style>
         body { background: #18222d; color: white; text-align: center; margin: 0; padding: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
-        /* Блок камери з плавною зміною кольору для помилки */
-        #reader { width: 100%; flex-grow: 1; background: #000; box-sizing: border-box; border-bottom: 3px solid #2ea6ff; transition: border 0.2s, box-shadow 0.2s; }
+        /* Блок камери */
+        #reader { width: 100%; height: 45vh; background: #000; box-sizing: border-box; border-bottom: 3px solid #2ea6ff; transition: border 0.2s, box-shadow 0.2s; flex-shrink: 0; }
         
-        /* Клас, який додає червону рамку при дублікаті */
-        .error-flash { border: 6px solid #ff3b30 !important; box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.8); }
+        /* Червона рамка при помилці */
+        .error-flash { border-bottom: 6px solid #ff3b30 !important; box-shadow: inset 0 -10px 30px rgba(255, 59, 48, 0.6); }
 
-        .stats { padding: 15px; height: 120px; display: flex; flex-direction: column; justify-content: center; background: #18222d; }
+        /* Блок статистики та списку */
+        .stats { flex-grow: 1; padding: 15px; display: flex; flex-direction: column; background: #18222d; overflow: hidden; }
         
-        /* Кнопка піднята вище, щоб обійти рекламу tiiny.host */
-        .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 90%; margin: 0 auto 60px auto; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000;}
+        /* Контейнер для прокрутки кодів */
+        .codes-scroll { flex-grow: 1; overflow-y: auto; margin-top: 10px; padding-right: 5px; }
+        
+        /* Дизайн одного відсканованого коду в списку */
+        .code-row { 
+            display: flex; justify-content: space-between; align-items: center; 
+            background: #243447; padding: 10px 15px; margin-bottom: 8px; 
+            border-radius: 8px; border-left: 3px solid #4caf50;
+            font-family: monospace; font-size: 16px; word-break: break-all; text-align: left;
+        }
+        
+        /* Кнопка видалення */
+        .del-btn { color: #ff3b30; font-size: 22px; font-weight: bold; cursor: pointer; padding-left: 15px; }
+
+        /* Кнопка відправки */
+        .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 90%; margin: 0 auto 20px auto; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000; flex-shrink: 0;}
     </style>
 </head>
 <body>
     <div id="reader"></div>
+    
     <div class="stats">
         <h2 id="count-text" style="color: #4caf50; margin: 0 0 5px 0;">Відскановано: 0</h2>
-        <p id="last-code" style="color: #aaa; margin: 0;">Наведіть рамку на код(и)</p>
+        
+        <div id="codes-list" class="codes-scroll">
+            <p style="color: #aaa; margin-top: 20px;">Наведіть рамку на код(и)...</p>
+        </div>
     </div>
+    
     <button class="btn" id="send-btn" onclick="sendData()">📤 ПЕРЕДАТИ В БОТ</button>
 
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
-        let scannedCodes = new Set();
-        let lastErrorTime = 0; // Запобіжник для спаму помилками
+        
+        // Змінили Set на масив, щоб зручно видаляти елементи
+        let scannedCodes = []; 
+        let lastErrorTime = 0; 
         
         // --- ГЕНЕРАТОР ЗВУКІВ ---
         const AudioContext = window.AudioContext || window.webkitAudioContext;
@@ -48,14 +70,14 @@
             
             if (type === 'success') {
                 oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); // Високий пік
+                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); 
                 gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
                 oscillator.start(audioCtx.currentTime);
                 oscillator.stop(audioCtx.currentTime + 0.1);
             } else if (type === 'error') {
                 oscillator.type = 'sawtooth';
-                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime); // Низький звук
+                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime); 
                 gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
                 gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
                 oscillator.start(audioCtx.currentTime);
@@ -64,17 +86,60 @@
         }
         // -----------------------
 
+        // --- ВІДМАЛЬОВКА СПИСКУ ---
+        function updateList() {
+            document.getElementById('count-text').innerText = "Відскановано: " + scannedCodes.length;
+            const listContainer = document.getElementById('codes-list');
+            const btn = document.getElementById('send-btn');
+
+            if (scannedCodes.length === 0) {
+                listContainer.innerHTML = "<p style='color: #aaa; margin-top: 20px;'>Список порожній</p>";
+                btn.style.display = "none";
+            } else {
+                btn.style.display = "block";
+                listContainer.innerHTML = scannedCodes.map((code, index) => `
+                    <div class="code-row">
+                        <span>${code}</span>
+                        <span class="del-btn" onclick="removeCode(${index})">✕</span>
+                    </div>
+                `).join('');
+            }
+        }
+
+        // Функція видалення коду по кліку на ✕
+        window.removeCode = function(index) {
+            scannedCodes.splice(index, 1);
+            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            updateList();
+        }
+
         const html5QrCode = new Html5Qrcode("reader");
+        
         const config = { 
             fps: 15, 
-            qrbox: function(vw, vh) { return { width: vw * 0.85, height: Math.min(vh * 0.4, 300) }; }
+            qrbox: function(vw, vh) { return { width: vw * 0.85, height: Math.min(vh * 0.4, 300) }; },
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+            formatsToSupport: [ 
+                Html5QrcodeSupportedFormats.QR_CODE,
+                Html5QrcodeSupportedFormats.DATA_MATRIX,
+                Html5QrcodeSupportedFormats.PDF_417,
+                Html5QrcodeSupportedFormats.CODE_128, 
+                Html5QrcodeSupportedFormats.CODE_39, 
+                Html5QrcodeSupportedFormats.CODE_93,
+                Html5QrcodeSupportedFormats.EAN_13,
+                Html5QrcodeSupportedFormats.EAN_8,
+                Html5QrcodeSupportedFormats.UPC_A,
+                Html5QrcodeSupportedFormats.UPC_E,
+                Html5QrcodeSupportedFormats.ITF,
+                Html5QrcodeSupportedFormats.CODABAR
+            ]
         };
 
         html5QrCode.start(
             { facingMode: "environment" }, 
             config,
             (decodedText) => {
-                let serials = decodedText.split(/\s+/);
+                let serials = decodedText.split(/[\s,;|\n\r]+/); // Розрізає пакетні QR-коди (на 36 шт)
                 let addedAny = false;
                 let hasDuplicates = false;
 
@@ -85,8 +150,8 @@
                     if (sn.length < 4) return;
 
                     if (sn) {
-                        if (!scannedCodes.has(sn)) {
-                            scannedCodes.add(sn);
+                        if (!scannedCodes.includes(sn)) {
+                            scannedCodes.unshift(sn); // Додаємо на самий верх списку
                             addedAny = true;
                         } else {
                             hasDuplicates = true;
@@ -100,27 +165,14 @@
                 if (addedAny) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                    
-                    document.getElementById('count-text').innerText = "Відскановано: " + scannedCodes.size;
-                    
-                    if (serials.length > 1) {
-                        document.getElementById('last-code').innerText = "📦 Додано пакетом";
-                    } else {
-                        let lastValid = Array.from(scannedCodes).pop();
-                        document.getElementById('last-code').innerText = "Останній: " + lastValid;
-                    }
-                    
-                    document.getElementById('send-btn').style.display = "block";
+                    updateList(); // Оновлюємо список на екрані
                 } 
-                // ЯКЩО КОД ВЖЕ БУВ (і пройшло більше 2 секунд з попереднього сигналу помилки)
+                // ЯКЩО КОД ВЖЕ БУВ:
                 else if (hasDuplicates && (now - lastErrorTime > 2000)) {
                     lastErrorTime = now;
                     playSound('error');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
                     
-                    document.getElementById('last-code').innerText = "⚠️ ЦЕЙ КОД ВЖЕ ВІДСКАНОВАНО!";
-                    
-                    // Блимаємо червоною рамкою
                     let readerDiv = document.getElementById('reader');
                     readerDiv.classList.add('error-flash');
                     setTimeout(() => {
@@ -130,12 +182,13 @@
             },
             (errorMessage) => {}
         ).catch((err) => {
-            document.getElementById('last-code').innerText = "Помилка камери: " + err;
+            document.getElementById('codes-list').innerHTML = "<p style='color: #ff3b30;'>Помилка камери: " + err + "</p>";
         });
 
         function sendData() {
-            if (scannedCodes.size > 0) {
-                tg.sendData(Array.from(scannedCodes).join('|'));
+            if (scannedCodes.length > 0) {
+                tg.sendData(scannedCodes.join('|'));
+                tg.close();
             }
         }
     </script>
