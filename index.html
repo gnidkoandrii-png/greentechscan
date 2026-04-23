@@ -9,9 +9,37 @@
     <style>
         body { background: #18222d; color: white; text-align: center; margin: 0; padding: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
-        #reader-wrapper { width: 100%; height: 45vh; overflow: hidden; background: #000; border-bottom: 3px solid #2ea6ff; flex-shrink: 0; display: flex; align-items: center; justify-content: center; position: relative; }
-        #reader { width: 100%; height: 100%; object-fit: cover; } 
+        /* БЛОК КАМЕРИ ТА НАША ЖОРСТКА РАМКА */
+        #reader-wrapper { width: 100%; height: 45vh; overflow: hidden; background: #000; border-bottom: 3px solid #2ea6ff; flex-shrink: 0; position: relative; }
+        #reader { width: 100%; height: 100%; } 
         
+        /* Ця рамка буде відображатися ЗАВЖДИ */
+        .custom-scanner-frame {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 85%;
+            height: 120px;
+            border: 2px solid #00ff00;
+            border-radius: 8px;
+            box-shadow: 0 0 0 9999px rgba(0, 0, 0, 0.6); /* Темний фон навколо рамки */
+            pointer-events: none; /* Щоб камера "бачила" крізь неї */
+            z-index: 10;
+        }
+
+        /* Червона лінія "лазера" для зручності прицілювання */
+        .custom-scanner-frame::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            left: 5%;
+            width: 90%;
+            height: 2px;
+            background: rgba(255, 0, 0, 0.7);
+            box-shadow: 0 0 8px red;
+        }
+
         .error-flash { border-bottom: 6px solid #ff3b30 !important; box-shadow: inset 0 -10px 30px rgba(255, 59, 48, 0.6); }
 
         .stats { flex-grow: 1; padding: 15px; display: flex; flex-direction: column; background: #18222d; overflow: hidden; }
@@ -26,11 +54,15 @@
         
         .del-btn { color: #ff3b30; font-size: 22px; font-weight: bold; cursor: pointer; padding-left: 15px; }
         .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 90%; margin: 0 auto 20px auto; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000; flex-shrink: 0;}
+
+        /* Ховаємо глючну системну рамку бібліотеки, якщо вона раптом з'явиться */
+        #reader svg { display: none !important; }
     </style>
 </head>
 <body>
     <div id="reader-wrapper">
         <div id="reader"></div>
+        <div class="custom-scanner-frame"></div>
     </div>
     
     <div class="stats">
@@ -106,9 +138,8 @@
         const config = { 
             fps: 30, 
             qrbox: function(vw, vh) { 
-                // ЗРОБИВ ЧІТКИЙ ПРЯМОКУТНИК
-                // Ширина на 90% екрану, висота фіксована - 120px. 
-                return { width: vw * 0.9, height: 120 }; 
+                // Зона сканування математично збігається з нашою видимою CSS-рамкою
+                return { width: vw * 0.85, height: 120 }; 
             },
             experimentalFeatures: { useBarCodeDetectorIfSupported: true }, 
             videoConstraints: {
