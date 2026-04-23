@@ -3,25 +3,98 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Scanner — серійники</title>
+  <title>Сканер — серійники з відправкою в бот</title>
   <style>
-    body{font-family:Arial;margin:16px}
-    #video{width:320px;height:240px;border:1px solid #ccc}
-    #list{margin-top:12px}
-    .item{display:flex;align-items:center;justify-content:space-between;padding:6px;border-bottom:1px solid #eee}
-    .code{font-family:monospace}
-    button{margin-left:8px}
+    :root{--bg:#fafafa;--accent:#1976d2}
+    html,body{height:100%;margin:0;font-family:Arial,Helvetica,sans-serif;background:var(--bg);color:#111}
+    header{display:flex;align-items:center;gap:12px;padding:12px;background:#fff;border-bottom:1px solid #e6e6e6}
+    header h1{font-size:16px;margin:0}
+    .controls{margin-left:auto;display:flex;gap:8px;align-items:center}
+    #videoContainer{position:relative;background:#000;display:flex;align-items:center;justify-content:center;height:60vh;max-height:80vh}
+    video#video{width:100%;height:100%;object-fit:cover}
+    #overlayStatus{position:absolute;left:12px;top:12px;background:rgba(0,0,0,0.45);color:#fff;padding:6px 10px;border-radius:6px;font-size:14px}
+    #listWrap{padding:12px;max-height:30vh;overflow:auto;background:#fff;border-top:1px solid #e6e6e6}
+    .item{display:flex;align-items:center;justify-content:space-between;padding:8px;border-bottom:1px solid #f0f0f0}
+    .code{font-family:monospace;color:#222}
+    button{background:var(--accent);color:#fff;border:0;padding:8px 10px;border-radius:6px;cursor:pointer}
+    button.secondary{background:#666}
+    select{padding:6px;border-radius:6px;border:1px solid #ccc}
+    .small{padding:6px 8px;font-size:13px}
+    .row{display:flex;gap:8px;align-items:center}
+    /* Модальне вікно */
+    .modal{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,0.45);z-index:999}
+    .modal.open{display:flex}
+    .modalCard{background:#fff;padding:16px;border-radius:8px;min-width:320px;max-width:90%}
+    .field{margin-bottom:8px;display:flex;flex-direction:column;gap:6px}
+    input[type="text"], textarea{padding:8px;border:1px solid #ccc;border-radius:6px;width:100%}
+    .muted{font-size:13px;color:#666}
+    @media (max-width:600px){
+      header{flex-wrap:wrap}
+      #videoContainer{height:55vh}
+    }
   </style>
 </head>
 <body>
-  <h3>Сканер штрих/QR кодів</h3>
-  <div>
-    <button id="startBtn">Запустити сканер</button>
-    <button id="stopBtn" disabled>Зупинити</button>
+  <header>
+    <h1>Сканер штрих/QR кодів</h1>
+    <div class="controls">
+      <label for="cameraSelect">Камера</label>
+      <select id="cameraSelect"></select>
+      <button id="startBtn" class="small">Запустити</button>
+      <button id="stopBtn" class="small secondary" disabled>Зупинити</button>
+      <button id="fullscreenBtn" class="small secondary">Повноекранний</button>
+    </div>
+  </header>
+
+  <main>
+    <div id="videoContainer">
+      <video id="video" muted playsinline></video>
+      <div id="overlayStatus">Готовий</div>
+    </div>
+
+    <div id="listWrap">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <strong>Список серійників</strong>
+        <div class="row">
+          <button id="sendBtn" class="small">Відправити в бот</button>
+          <button id="clearAll" class="small secondary">Очистити все</button>
+        </div>
+      </div>
+      <div id="list"></div>
+      <div id="sendStatus" class="muted" style="margin-top:8px"></div>
+    </div>
+  </main>
+
+  <!-- Модальне вікно для налаштування відправки -->
+  <div id="sendModal" class="modal" role="dialog" aria-modal="true">
+    <div class="modalCard">
+      <h3>Відправити серійники в бот</h3>
+      <div class="field">
+        <label><input type="radio" name="sendMethod" value="webhook" checked> Webhook (POST JSON)</label>
+        <label><input type="radio" name="sendMethod" value="telegram"> Telegram Bot</label>
+      </div>
+
+      <div id="webhookFields" class="field">
+        <label>Webhook URL</label>
+        <input id="webhookUrl" type="text" placeholder="https://example.com/webhook">
+        <div class="muted">Буде виконано POST з JSON: { "serials": ["A","B",...] }</div>
+      </div>
+
+      <div id="telegramFields" class="field" style="display:none">
+        <label>Bot Token</label>
+        <input id="tgToken" type="text" placeholder="123456:ABC-DEF...">
+        <label>Chat ID</label>
+        <input id="tgChatId" type="text" placeholder="123456789">
+        <div class="muted">Повідомлення буде відправлено через Telegram Bot API.</div>
+      </div>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px">
+        <button id="modalSend" class="small">Відправити</button>
+        <button id="modalCancel" class="small secondary">Скасувати</button>
+      </div>
+      <div id="modalMsg" class="muted" style="margin-top:8px"></div>
+    </div>
   </div>
-  <video id="video" muted playsinline></video>
-  <div id="status"></div>
-  <div id="list"></div>
 
   <script src="https://unpkg.com/@zxing/library@latest/umd/index.min.js"></script>
   <script>
@@ -29,62 +102,68 @@
     const videoElem = document.getElementById('video');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
-    const status = document.getElementById('status');
+    const fullscreenBtn = document.getElementById('fullscreenBtn');
+    const status = document.getElementById('overlayStatus');
     const list = document.getElementById('list');
-    let controls;
+    const cameraSelect = document.getElementById('cameraSelect');
+    const clearAllBtn = document.getElementById('clearAll');
+    const sendBtn = document.getElementById('sendBtn');
+    const sendStatus = document.getElementById('sendStatus');
+
+    const sendModal = document.getElementById('sendModal');
+    const webhookFields = document.getElementById('webhookFields');
+    const telegramFields = document.getElementById('telegramFields');
+    const webhookUrlInput = document.getElementById('webhookUrl');
+    const tgTokenInput = document.getElementById('tgToken');
+    const tgChatIdInput = document.getElementById('tgChatId');
+    const modalSend = document.getElementById('modalSend');
+    const modalCancel = document.getElementById('modalCancel');
+    const modalMsg = document.getElementById('modalMsg');
+
+    let decodeControls = null;
+    const serialSet = new Set();
 
     function addSerial(serial) {
-      serial = serial.trim();
-      if(!serial) return;
-      // унікальність
-      if(document.querySelector(`[data-code="${CSS.escape(serial)}"]`)) return;
+      serial = String(serial).trim();
+      if (!serial) return false;
+      if (serialSet.has(serial)) {
+        status.textContent = `Дубль: ${serial} — не додано`;
+        return false;
+      }
+      serialSet.add(serial);
       const row = document.createElement('div');
       row.className = 'item';
       row.dataset.code = serial;
-      row.innerHTML = `<span class="code">${serial}</span><div><button class="del">Видалити</button></div>`;
-      row.querySelector('.del').addEventListener('click', ()=> row.remove());
+      const left = document.createElement('div');
+      left.className = 'code';
+      left.textContent = serial;
+      const right = document.createElement('div');
+      const del = document.createElement('button');
+      del.textContent = 'Видалити';
+      del.className = 'small secondary';
+      del.addEventListener('click', () => {
+        serialSet.delete(serial);
+        row.remove();
+      });
+      right.appendChild(del);
+      row.appendChild(left);
+      row.appendChild(right);
       list.prepend(row);
+      status.textContent = `Додано: ${serial}`;
+      return true;
     }
 
     function parseAndAdd(text) {
-      // Роздільники: новий рядок, кома, крапка з комою, пробіл
-      const parts = text.split(/[\r\n,;]+|\s+/).map(s=>s.trim()).filter(Boolean);
-      // Якщо в QR закодовано один рядок з 30 серійниками, parts.length буде 30
-      parts.forEach(addSerial);
-      status.textContent = `Додано ${parts.length} серійників`;
-    }
-
-    startBtn.addEventListener('click', async () => {
-      startBtn.disabled = true;
-      status.textContent = 'Запит доступу до камери...';
+      if (!text) return;
+      let candidates = [];
       try {
-        const devices = await codeReader.listVideoInputDevices();
-        const deviceId = devices.length ? devices[0].deviceId : undefined;
-        controls = await codeReader.decodeFromVideoDevice(deviceId, videoElem, (result, err) => {
-          if (result) {
-            // Результат текстовий
-            parseAndAdd(result.getText());
-          }
-          if (err && !(err instanceof ZXing.NotFoundException)) {
-            console.error(err);
-          }
-        });
-        stopBtn.disabled = false;
-        status.textContent = 'Сканер запущено';
-      } catch (e) {
-        console.error(e);
-        status.textContent = 'Помилка доступу до камери: ' + e.message;
-        startBtn.disabled = false;
-      }
-    });
-
-    stopBtn.addEventListener('click', () => {
-      codeReader.reset();
-      videoElem.srcObject = null;
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-      status.textContent = 'Сканер зупинено';
-    });
-  </script>
-</body>
-</html>
+        const maybe = JSON.parse(text);
+        if (Array.isArray(maybe)) {
+          candidates = maybe.map(String);
+        } else if (typeof maybe === 'object' && maybe !== null) {
+          for (const k of Object.keys(maybe)) {
+            if (Array.isArray(maybe[k])) {
+              candidates = maybe[k].map(String);
+              break;
+            } else if (typeof maybe[k] === 'string' && maybe[k].match(/[,;\n]/)) {
+              candidates = maybe
