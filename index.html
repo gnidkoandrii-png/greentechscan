@@ -3,31 +3,40 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Greentech Professional Scanner</title>
+    <title>Greentech Smart Scanner</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
-        body { margin: 0; background: #000; color: white; font-family: sans-serif; overflow: hidden; display: flex; flex-direction: column; }
-        #video-container { position: relative; width: 100%; height: 80vh; background: #000; }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+        #video-container { position: relative; width: 100%; height: 65vh; background: #000; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
-        .overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 250px; height: 150px; border: 2px solid #00ff00; border-radius: 15px; box-shadow: 0 0 20px rgba(0,255,0,0.5); pointer-events: none; }
-        .ui { padding: 15px; text-align: center; background: #1a1a1a; flex-grow: 1; }
-        .status { font-size: 14px; color: #00ff00; margin-bottom: 10px; }
-        button { background: #444; color: white; border: none; padding: 10px 20px; border-radius: 8px; }
+        .scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 260px; height: 160px; border: 2px solid #007bff; border-radius: 15px; box-shadow: 0 0 15px rgba(0,123,255,0.5); pointer-events: none; }
+        
+        .result-panel { 
+            flex-grow: 1; background: #1a1a1a; padding: 15px; display: flex; flex-direction: column; align-items: center; justify-content: center;
+            border-top: 2px solid #333;
+        }
+        #result-text { font-size: 16px; margin-bottom: 15px; color: #aaa; text-align: center; word-break: break-all; max-height: 60px; overflow-y: auto; width: 100%; }
+        .btn-group { display: flex; gap: 10px; width: 100%; }
+        button { flex: 1; padding: 15px; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; }
+        #send-btn { background: #28a745; color: white; display: none; }
+        #reset-btn { background: #444; color: white; }
     </style>
 </head>
 <body>
 
 <div id="video-container">
     <video id="video" playsinline></video>
-    <div class="overlay"></div>
+    <div class="scan-region"></div>
 </div>
 
-<div class="ui">
-    <div id="status" class="status">Шукаю код (Greentech)...</div>
-    <button onclick="location.reload()">🔄 ПЕРЕЗАПУСТИТИ</button>
+<div class="result-panel">
+    <div id="result-text">Наведіть камеру на код...</div>
+    <div class="btn-group">
+        <button id="reset-btn" onclick="resetScanner()">🔄 ЗАНОВО</button>
+        <button id="send-btn" onclick="sendToBot()">✅ ВІДПРАВИТИ</button>
+    </div>
 </div>
 
 <script>
@@ -35,84 +44,78 @@
     tg.expand();
 
     const video = document.getElementById('video');
-    const status = document.getElementById('status');
-    let isProcessing = false;
+    const resultText = document.getElementById('result-text');
+    const sendBtn = document.getElementById('send-btn');
+    
+    let currentCode = "";
+    let isLocked = false;
 
-    // Функція фільтрації та розбору коду
-    function processScannedData(data) {
-        if (isProcessing) return;
+    function processData(data) {
+        if (isLocked) return;
 
-        // 1. Ігноруємо посилання (http, https, www)
+        // Ігноруємо посилання
         const urlPattern = /^(http|https|www|ftp):\/\/[^\s/$.?#].[^\s]*$/i;
-        if (urlPattern.test(data.trim())) {
-            console.log("Ігнорую посилання:", data);
-            return;
-        }
+        if (urlPattern.test(data.trim())) return;
 
-        isProcessing = true;
-
-        // 2. Розбиваємо "складні" коди (якщо вшито кілька через пробіл, кому або крапку з комою)
-        // Наприклад: "SN123,SN456,SN789" -> ["SN123", "SN456", "SN789"]
+        // Розбиваємо складні коди
         let codes = data.split(/[\s,;]+/).filter(c => c.length > 2);
-
+        
         if (codes.length > 0) {
-            status.innerText = "✅ Зчитано: " + codes.join(", ");
-            status.style.color = "#ffff00";
-
-            // Відправляємо боту (якщо кодів кілька, відправляємо їх через розділювач)
-            tg.sendData(codes.join("|")); 
+            isLocked = true; // Зупиняємо сканування
+            currentCode = codes.join("|");
             
-            setTimeout(() => {
-                tg.close();
-            }, 500);
-        } else {
-            isProcessing = false;
+            resultText.innerHTML = "<b>Зчитано коди:</b><br>" + codes.join("<br>");
+            resultText.style.color = "#00ff00";
+            sendBtn.style.display = "block"; // Показуємо кнопку відправки
         }
     }
 
-    // Налаштування камери
+    function resetScanner() {
+        isLocked = false;
+        currentCode = "";
+        resultText.innerText = "Наведіть камеру на код...";
+        resultText.style.color = "#aaa";
+        sendBtn.style.display = "none";
+    }
+
+    function sendToBot() {
+        if (currentCode) {
+            tg.sendData(currentCode);
+            tg.close();
+        }
+    }
+
     navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
         video.srcObject = stream;
-        video.setAttribute("playsinline", true);
         video.play();
         requestAnimationFrame(tick);
     });
 
     function tick() {
-        if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        if (!isLocked && video.readyState === video.HAVE_ENOUGH_DATA) {
             const canvasElement = document.createElement("canvas");
             const canvas = canvasElement.getContext("2d");
             canvasElement.height = video.videoHeight;
             canvasElement.width = video.videoWidth;
             canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-            
             const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
 
-            // АЛГОРИТМ 1: Пошук QR-коду
-            const qrCode = jsQR(imageData.data, imageData.width, imageData.height, {
-                inversionAttempts: "dontInvert",
-            });
-
-            if (qrCode && qrCode.data) {
-                processScannedData(qrCode.data);
-            }
-
-            // АЛГОРИТМ 2: Пошук штрих-коду (якщо QR не знайдено)
-            if (!isProcessing) {
+            // Шукаємо QR
+            const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
+            if (qrCode) {
+                processData(qrCode.data);
+            } else {
+                // Шукаємо Штрих-код
                 Quagga.decodeSingle({
                     src: canvasElement.toDataURL(),
-                    decoder: {
-                        readers: ["code_128_reader", "ean_reader", "code_39_reader"]
-                    },
+                    decoder: { readers: ["code_128_reader", "ean_reader"] },
                     locate: true
-                }, function(result) {
-                    if (result && result.codeResult) {
-                        processScannedData(result.codeResult.code);
-                    }
+                }, (result) => {
+                    if (result && result.codeResult) processData(result.codeResult.code);
                 });
             }
         }
-        if (!isProcessing) requestAnimationFrame(tick);
+        requestAnimationFrame(tick);
     }
 </script>
 
