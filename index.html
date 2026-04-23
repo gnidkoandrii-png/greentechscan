@@ -3,143 +3,76 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Greentech Pro Scanner</title>
+    <title>Greentech Scanner</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2/dist/quagga.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
     <style>
-        body { margin: 0; background: #000; color: white; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        #video-container { position: relative; width: 100%; height: 45vh; background: #000; }
+        body { margin: 0; padding: 0; background: #000; overflow: hidden; font-family: sans-serif; }
+        #interactive { width: 100%; height: 100vh; position: relative; }
         video { width: 100%; height: 100%; object-fit: cover; }
-        .scan-region { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 280px; height: 140px; border: 2px solid #007bff; border-radius: 15px; box-shadow: 0 0 20px rgba(0,123,255,0.4); pointer-events: none; }
-        
-        .list-panel { flex-grow: 1; background: #121212; padding: 12px; display: flex; flex-direction: column; border-top: 2px solid #333; }
-        .counter { font-size: 18px; font-weight: bold; color: #007bff; text-align: center; margin-bottom: 10px; }
-        #codes-list { flex-grow: 1; overflow-y: auto; background: #000; border-radius: 10px; padding: 5px; border: 1px solid #222; }
-        
-        .code-item { 
-            background: #1c1c1c; margin-bottom: 6px; padding: 12px; border-radius: 8px;
-            display: flex; justify-content: space-between; align-items: center;
-            border-left: 4px solid #007bff;
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; }
+        .overlay {
+            position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+            width: 250px; height: 150px; border: 2px solid #00ff00; border-radius: 10px;
+            box-shadow: 0 0 0 500px rgba(0, 0, 0, 0.5); pointer-events: none;
         }
-        .remove-btn { color: #ff4d4d; font-size: 22px; font-weight: bold; padding: 5px 12px; cursor: pointer; }
-        
-        .footer-btns { padding-top: 12px; }
-        #send-btn { 
-            width: 100%; background: #28a745; color: white; border: none; 
-            padding: 18px; border-radius: 12px; font-size: 18px; font-weight: bold; 
+        .status {
+            position: absolute; bottom: 50px; width: 100%; text-align: center;
+            color: #fff; font-size: 18px; z-index: 10; font-weight: bold;
         }
-        #send-btn:disabled { background: #444; color: #888; }
     </style>
 </head>
 <body>
 
-<div id="video-container">
-    <video id="video" playsinline></video>
-    <div class="scan-region"></div>
-</div>
-
-<div class="list-panel">
-    <div class="counter">📊 СКАНОВАНО: <span id="count">0</span> шт.</div>
-    <div id="codes-list"></div>
-    <div class="footer-btns">
-        <button id="send-btn" onclick="sendToBot()" disabled>ВІДПРАВИТИ В БОТ (0)</button>
-    </div>
-</div>
+<div id="interactive"></div>
+<div class="overlay"></div>
+<div class="status" id="status">Шукаю штрих-код...</div>
 
 <script>
     const tg = window.Telegram.WebApp;
     tg.expand();
 
-    const video = document.getElementById('video');
-    const codesList = document.getElementById('codes-list');
-    const countDisplay = document.getElementById('count');
-    const sendBtn = document.getElementById('send-btn');
-    
-    let scannedCodes = [];
-    let throttleTimeout = false;
+    let isScanning = true;
 
-    // Розумний фільтр
-    function isValidCode(code) {
-        const text = code.trim();
-        if (/^(http|https|www)/i.test(text)) return false; // Ігноруємо посилання
-        if (!/\d/.test(text)) return false; // Тільки якщо є хоча б одна цифра
-        if (text.length < 4) return false; // Не беремо занадто короткі
-        return true;
-    }
-
-    function addCode(code) {
-        if (throttleTimeout || scannedCodes.includes(code)) return;
-        if (!isValidCode(code)) return;
-
-        scannedCodes.unshift(code);
-        updateUI();
-
-        if (navigator.vibrate) navigator.vibrate(50);
-        throttleTimeout = true;
-        setTimeout(() => { throttleTimeout = false; }, 1300);
-    }
-
-    function removeCode(index) {
-        scannedCodes.splice(index, 1);
-        updateUI();
-    }
-
-    function updateUI() {
-        const len = scannedCodes.length;
-        countDisplay.innerText = len;
-        sendBtn.innerText = `ВІДПРАВИТИ В БОТ (${len})`;
-        sendBtn.disabled = len === 0;
-        
-        if (len === 0) {
-            codesList.innerHTML = "<div style='text-align:center; padding:30px; color:#444;'>Очікування...</div>";
+    Quagga.init({
+        inputStream: {
+            name: "Live",
+            type: "LiveStream",
+            target: document.querySelector('#interactive'),
+            constraints: { facingMode: "environment" }
+        },
+        decoder: {
+            readers: ["code_128_reader", "ean_reader", "code_39_reader"]
+        },
+        locate: true
+    }, function(err) {
+        if (err) {
+            console.error(err);
+            alert("Помилка камери");
             return;
         }
-
-        codesList.innerHTML = scannedCodes.map((code, index) => `
-            <div class="code-item">
-                <span style="font-family: monospace;">${code}</span>
-                <span class="remove-btn" onclick="removeCode(${index})">✕</span>
-            </div>
-        `).join("");
-    }
-
-    function sendToBot() {
-        tg.sendData(scannedCodes.join("|"));
-        tg.close();
-    }
-
-    navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }).then(function(stream) {
-        video.srcObject = stream;
-        video.play();
-        requestAnimationFrame(tick);
+        Quagga.start();
     });
 
-    function tick() {
-        if (video.readyState === video.HAVE_ENOUGH_DATA && !throttleTimeout) {
-            const canvasElement = document.createElement("canvas");
-            const canvas = canvasElement.getContext("2d");
-            canvasElement.height = video.videoHeight;
-            canvasElement.width = video.videoWidth;
-            canvas.drawImage(video, 0, 0, canvasElement.width, canvasElement.height);
-            const imageData = canvas.getImageData(0, 0, canvasElement.width, canvasElement.height);
-
-            const qrCode = jsQR(imageData.data, imageData.width, imageData.height);
-            if (qrCode) {
-                addCode(qrCode.data);
-            } else {
-                Quagga.decodeSingle({
-                    src: canvasElement.toDataURL(),
-                    decoder: { readers: ["code_128_reader", "ean_reader", "code_39_reader"] },
-                    locate: true
-                }, (result) => {
-                    if (result && result.codeResult) addCode(result.codeResult.code);
-                });
-            }
+    Quagga.onDetected(function(result) {
+        if (!isScanning) return;
+        
+        const code = result.codeResult.code;
+        if (code) {
+            isScanning = false;
+            document.getElementById('status').innerText = "Зчитано: " + code;
+            
+            // Відправляємо в бот і закриваємо
+            tg.sendData(code);
+            
+            if (navigator.vibrate) navigator.vibrate(100);
+            
+            setTimeout(() => {
+                tg.close();
+            }, 500);
         }
-        requestAnimationFrame(tick);
-    }
-    updateUI();
+    });
 </script>
+
 </body>
 </html>
