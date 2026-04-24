@@ -47,7 +47,7 @@
             <p style="color: #aaa; margin: 0;">Наведіть рамку на код(и)</p>
         </div>
         
-        <button class="btn" id="native-scan-btn" onclick="openNativeScanner()">⚡️ ТУРБО-СКАНЕР (Айфон)</button>
+        <button class="btn" id="native-scan-btn" onclick="openNativeScanner()">⚡️ ТУРБО-СКАНЕР (Для QR-кодів)</button>
         <button class="btn" id="send-btn" onclick="sendData()">📤 ПЕРЕДАТИ В БОТ</button>
     </div>
 
@@ -55,7 +55,7 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
         
-        // Ховаємо жовту кнопку на Android
+        // Ховаємо кнопку системного сканера на Android
         if (tg.platform === 'android') {
             document.getElementById('native-scan-btn').style.display = 'none';
         }
@@ -94,12 +94,17 @@
             document.getElementById('count-text').innerText = "Відскановано: " + scannedCodes.length;
             const listContainer = document.getElementById('codes-list');
             const btn = document.getElementById('send-btn');
+            const nativeBtn = document.getElementById('native-scan-btn');
 
             if (scannedCodes.length === 0) {
                 listContainer.innerHTML = "<p style='color: #aaa; margin: 0;'>Наведіть рамку на код(и)</p>";
                 btn.style.display = "none";
+                if (tg.platform !== 'android') nativeBtn.style.display = "block";
             } else {
                 btn.style.display = "block";
+                // Коли є коди для відправки, ховаємо жовту кнопку, щоб не заважала
+                nativeBtn.style.display = "none"; 
+                
                 listContainer.innerHTML = scannedCodes.map((code, index) => `
                     <div class="code-row">
                         <span>${code}</span>
@@ -115,10 +120,10 @@
             updateList();
         }
 
-        // --- ЛОГІКА СИСТЕМНОГО СКАНЕРА (БЕЗПЕРЕРВНОГО) ---
+        // --- ТУРБО-СКАНЕР ДЛЯ QR-КОДІВ (БЕЗПЕРЕРВНИЙ) ---
         window.openNativeScanner = function() {
             tg.showScanQrPopup({
-                text: "Скануйте по черзі. Для виходу натисніть 'Закрити' / 'Скасувати'"
+                text: "Скануйте QR-коди. Для виходу натисніть 'Закрити'"
             }, function(text) {
                 let serials = text.split(/[\s,;|\n\r]+/);
                 let addedAny = false;
@@ -149,19 +154,24 @@
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
                 }
                 
-                // return false залишає сканер відкритим для наступного штрих-коду
-                return false; 
+                return false; // Не закриваємо сканер після першого коду
             });
         }
 
-        // --- ЛОГІКА ВЕБ-СКАНЕРА (Запускається завжди) ---
         const html5QrCode = new Html5Qrcode("reader");
         
         const config = { 
-            fps: 30, 
+            fps: 15, 
             qrbox: function(vw, vh) { 
-                return { width: Math.floor(vw * 0.95), height: 140 }; 
+                // РАМКА СТАЛА КВАДРАТНІШОЮ: Широка (85%), але тепер висока (250 пікселів)
+                return { width: Math.floor(vw * 0.85), height: 250 }; 
             }, 
+            experimentalFeatures: { useBarCodeDetectorIfSupported: true },
+            videoConstraints: {
+                facingMode: "environment",
+                width: { ideal: 1280 }, 
+                height: { ideal: 720 }
+            },
             formatsToSupport: [ 
                 Html5QrcodeSupportedFormats.QR_CODE,
                 Html5QrcodeSupportedFormats.CODE_128 
@@ -213,7 +223,7 @@
             },
             (errorMessage) => {}
         ).catch((err) => {
-            document.getElementById('codes-list').innerHTML = `<p style='color: #ff3b30;'>Помилка камери: ${err}</p><p style='color: #aaa; font-size: 12px;'>Переконайтеся, що Telegram має дозвіл на використання камери.</p>`;
+            document.getElementById('codes-list').innerHTML = `<p style='color: #ff3b30;'>Помилка камери: ${err}</p>`;
         });
 
         function sendData() {
