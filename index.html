@@ -31,7 +31,6 @@
 
         .btn { border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 100%; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); flex-shrink: 0; cursor: pointer; }
         
-        /* Стилі для кнопок */
         #native-scan-btn { background: #ffcc00; color: #000; margin-bottom: 10px; display: block; }
         #send-btn { background: #2ea6ff; color: white; display: none; }
     </style>
@@ -55,6 +54,12 @@
     <script>
         let tg = window.Telegram.WebApp;
         tg.expand();
+        
+        // --- ПЕРЕВІРКА ПЛАТФОРМИ ---
+        // Якщо це Android, приховуємо жовту кнопку, бо там і так все швидко
+        if (tg.platform === 'android') {
+            document.getElementById('native-scan-btn').style.display = 'none';
+        }
         
         let scannedCodes = []; 
         let lastErrorTime = 0; 
@@ -111,7 +116,6 @@
             updateList();
         }
 
-        // --- ЛОГІКА СИСТЕМНОГО СКАНЕРА (TURBO-РЕЖИМ) ---
         window.openNativeScanner = function() {
             tg.showScanQrPopup({
                 text: "Наведіть на штрих-код інвертора"
@@ -145,10 +149,9 @@
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
                 }
                 
-                return true; // Автоматично закриває системний сканер
+                return true; 
             });
         }
-        // ----------------------------------------------
 
         const html5QrCode = new Html5Qrcode("reader");
         
