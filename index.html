@@ -55,7 +55,6 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
         
-        // Ховаємо кнопку системного сканера на Android
         if (tg.platform === 'android') {
             document.getElementById('native-scan-btn').style.display = 'none';
         }
@@ -102,7 +101,6 @@
                 if (tg.platform !== 'android') nativeBtn.style.display = "block";
             } else {
                 btn.style.display = "block";
-                // Коли є коди для відправки, ховаємо жовту кнопку, щоб не заважала
                 nativeBtn.style.display = "none"; 
                 
                 listContainer.innerHTML = scannedCodes.map((code, index) => `
@@ -120,7 +118,7 @@
             updateList();
         }
 
-        // --- ТУРБО-СКАНЕР ДЛЯ QR-КОДІВ (БЕЗПЕРЕРВНИЙ) ---
+        // --- Запасний системний сканер для QR-кодів ---
         window.openNativeScanner = function() {
             tg.showScanQrPopup({
                 text: "Скануйте QR-коди. Для виходу натисніть 'Закрити'"
@@ -154,16 +152,17 @@
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
                 }
                 
-                return false; // Не закриваємо сканер після першого коду
+                return false; 
             });
         }
 
+        // --- ОСНОВНИЙ ВЕБ-СКАНЕР (Читає і QR, і штрих-коди) ---
         const html5QrCode = new Html5Qrcode("reader");
         
         const config = { 
-            fps: 15, 
+            fps: 15, // Оптимізовано для iPhone
             qrbox: function(vw, vh) { 
-                // РАМКА СТАЛА КВАДРАТНІШОЮ: Широка (85%), але тепер висока (250 пікселів)
+                // Висока рамка (250px), щоб туди влазив і довгий штрих-код, і квадратний QR
                 return { width: Math.floor(vw * 0.85), height: 250 }; 
             }, 
             experimentalFeatures: { useBarCodeDetectorIfSupported: true },
@@ -173,8 +172,8 @@
                 height: { ideal: 720 }
             },
             formatsToSupport: [ 
-                Html5QrcodeSupportedFormats.QR_CODE,
-                Html5QrcodeSupportedFormats.CODE_128 
+                Html5QrcodeSupportedFormats.QR_CODE, // Читає QR-коди!
+                Html5QrcodeSupportedFormats.CODE_128 // Читає довгі штрих-коди!
             ]
         };
 
