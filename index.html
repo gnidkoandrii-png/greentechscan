@@ -9,34 +9,36 @@
     <style>
         body { background: #18222d; color: white; text-align: center; margin: 0; padding: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
         
-        /* Блок камери: фіксована висота, щоб дати місце списку */
-        #reader-wrapper { width: 100%; height: 45vh; background: #000; box-sizing: border-box; border-bottom: 3px solid #2ea6ff; transition: border 0.2s, box-shadow 0.2s; position: relative; overflow: hidden; flex-shrink: 0; }
-        #reader { width: 100%; height: 100%; object-fit: cover; }
+        /* Блок камери: фіксуємо висоту, щоб дати місце для списку */
+        #reader { width: 100%; height: 45vh; flex-shrink: 0; background: #000; box-sizing: border-box; border-bottom: 3px solid #2ea6ff; transition: border 0.2s, box-shadow 0.2s; }
         
-        /* Клас, який додає червону рамку при дублікаті */
         .error-flash { border: 6px solid #ff3b30 !important; box-shadow: inset 0 0 30px rgba(255, 59, 48, 0.8); }
 
-        /* Статистика та список */
+        /* Статистика та список: тепер займають весь вільний простір */
         .stats { padding: 15px; flex-grow: 1; display: flex; flex-direction: column; background: #18222d; overflow: hidden; }
         
-        /* Прокрутка для кодів */
+        /* Блок для прокрутки кодів */
         .codes-scroll { flex-grow: 1; overflow-y: auto; margin-top: 10px; padding-right: 5px; }
         
-        /* Дизайн рядка в списку */
-        .code-row { display: flex; justify-content: space-between; align-items: center; background: #243447; padding: 10px 15px; margin-bottom: 8px; border-radius: 8px; border-left: 3px solid #4caf50; font-family: monospace; font-size: 16px; word-break: break-all; text-align: left; }
+        /* Дизайн одного рядка в списку */
+        .code-row { 
+            display: flex; justify-content: space-between; align-items: center; 
+            background: #243447; padding: 10px 15px; margin-bottom: 8px; 
+            border-radius: 8px; border-left: 3px solid #4caf50;
+            font-family: monospace; font-size: 16px; word-break: break-all; text-align: left;
+        }
+        
         .del-btn { color: #ff3b30; font-size: 22px; font-weight: bold; cursor: pointer; padding-left: 15px; }
 
-        /* Кнопка піднята вище */
-        .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 90%; margin: 0 auto 20px auto; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000; flex-shrink: 0; }
+        .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 90%; margin: 0 auto 20px auto; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000; flex-shrink: 0;}
     </style>
 </head>
 <body>
-    <div id="reader-wrapper">
-        <div id="reader"></div>
-    </div>
+    <div id="reader"></div>
     
     <div class="stats">
         <h2 id="count-text" style="color: #4caf50; margin: 0 0 5px 0;">Відскановано: 0</h2>
+        
         <div id="codes-list" class="codes-scroll">
             <p style="color: #aaa; margin: 0;">Наведіть рамку на код(и)</p>
         </div>
@@ -48,7 +50,8 @@
         let tg = window.Telegram.WebApp;
         tg.expand();
         
-        let scannedCodes = []; // Масив для зручного видалення
+        // Змінено з Set на Array для зручного списку
+        let scannedCodes = []; 
         let lastErrorTime = 0; 
         
         // --- ГЕНЕРАТОР ЗВУКІВ ---
@@ -81,41 +84,41 @@
         // -----------------------
 
         // --- ВІДМАЛЬОВКА СПИСКУ ---
-        function updateUI() {
+        function updateList() {
             document.getElementById('count-text').innerText = "Відскановано: " + scannedCodes.length;
-            const listDiv = document.getElementById('codes-list');
+            const listContainer = document.getElementById('codes-list');
             const btn = document.getElementById('send-btn');
-            
+
             if (scannedCodes.length === 0) {
-                listDiv.innerHTML = "<p style='color: #aaa; margin: 0;'>Наведіть рамку на код(и)</p>";
+                listContainer.innerHTML = "<p style='color: #aaa; margin: 0;'>Наведіть рамку на код(и)</p>";
                 btn.style.display = "none";
             } else {
-                listDiv.innerHTML = scannedCodes.map((code, index) => `
+                btn.style.display = "block";
+                listContainer.innerHTML = scannedCodes.map((code, index) => `
                     <div class="code-row">
                         <span>${code}</span>
                         <span class="del-btn" onclick="removeCode(${index})">✕</span>
                     </div>
                 `).join('');
-                btn.style.display = "block";
             }
         }
 
         window.removeCode = function(index) {
             scannedCodes.splice(index, 1);
             if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-            updateUI();
-        };
+            updateList();
+        }
 
         const html5QrCode = new Html5Qrcode("reader");
         
-        // --- ОПТИМІЗОВАНІ НАЛАШТУВАННЯ ---
+        // Збережено твою рамку + додано оптимізацію швидкості
         const config = { 
-            fps: 30, 
-            qrbox: function(vw, vh) { return { width: vw * 0.85, height: 120 }; }, // Стандартна рідна рамка
+            fps: 20, 
+            qrbox: function(vw, vh) { return { width: vw * 0.85, height: Math.min(vh * 0.4, 300) }; },
             experimentalFeatures: { useBarCodeDetectorIfSupported: true },
             videoConstraints: {
                 facingMode: "environment",
-                width: { ideal: 1920 }, // HD якість
+                width: { ideal: 1920 },
                 height: { ideal: 1080 }
             },
             formatsToSupport: [ 
@@ -140,7 +143,7 @@
 
                     if (sn) {
                         if (!scannedCodes.includes(sn)) {
-                            scannedCodes.unshift(sn); 
+                            scannedCodes.unshift(sn); // Додаємо на початок списку
                             addedAny = true;
                         } else {
                             hasDuplicates = true;
@@ -150,17 +153,20 @@
 
                 let now = Date.now();
 
+                // ЯКЩО ДОДАНО НОВИЙ КОД:
                 if (addedAny) {
                     playSound('success');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                    updateUI(); 
+                    updateList(); // Оновлюємо список
                 } 
+                // ЯКЩО КОД ВЖЕ БУВ (і пройшло більше 2 секунд з попереднього сигналу помилки)
                 else if (hasDuplicates && (now - lastErrorTime > 2000)) {
                     lastErrorTime = now;
                     playSound('error');
                     if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
                     
-                    let readerDiv = document.getElementById('reader-wrapper');
+                    // Блимаємо червоною рамкою
+                    let readerDiv = document.getElementById('reader');
                     readerDiv.classList.add('error-flash');
                     setTimeout(() => {
                         readerDiv.classList.remove('error-flash');
