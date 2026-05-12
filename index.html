@@ -426,46 +426,108 @@
         });
 
     } else if (typeof tg.showScanQrPopup === 'function') {
-        /* ── iOS Telegram: фото → ZXing (один код зблизька) ── */
-        loader.style.display = 'none';
-        const wrapper = document.getElementById('cam-wrapper');
-        wrapper.style.background = '#18222d';
-        wrapper.innerHTML = `
-            <input type="file" id="cam-file" accept="image/*" capture="environment" style="display:none">
-            <div style="display:flex;flex-direction:column;align-items:center;
-                        justify-content:center;height:100%;gap:12px;padding:0 16px;">
-                <div style="font-size:50px">📷</div>
-                <div style="color:#aaa;font-size:12px;text-align:center;line-height:1.5">
-                    Сфотографуйте один штрих-код або QR зблизька
-                </div>
-                <button id="ios-scan-btn"
-                    style="background:#2ea6ff;color:white;border:none;padding:14px 36px;
-                           border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;">
-                    📸 Сканувати
-                </button>
-                <div id="ios-dbg" style="color:#555;font-size:10px;max-width:92%;
-                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">очікування...</div>
-            </div>`;
+        /* ── iOS Telegram: live ZXing scan; photo fallback if camera unavailable ── */
+        loaderTx.textContent = 'Запит доступу до камери...';
 
-        document.getElementById('ios-scan-btn').addEventListener('click', () => {
-            document.getElementById('cam-file').click();
-        });
-        document.getElementById('cam-file').addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            const dbg = document.getElementById('ios-dbg');
-            if (dbg) dbg.textContent = 'Обробка...';
+        let iosStream = null;
+        try {
+            iosStream = await Promise.race([
+                navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+                }),
+                new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 8000))
+            ]);
+        } catch(e) { iosStream = null; }
+
+        if (iosStream) {
+            video.srcObject = iosStream;
             try {
-                const result = await decodeImageFile(file);
-                if (dbg) dbg.textContent = '→ ' + result.value.substring(0, 50);
-                handleDecoded(result);
-                tg.HapticFeedback?.notificationOccurred('success');
-            } catch(err) {
-                if (dbg) dbg.textContent = 'Код не знайдено — підійдіть ближче';
-                tg.HapticFeedback?.notificationOccurred('error');
+                await Promise.race([
+                    new Promise(r => { video.onloadedmetadata = r; }),
+                    new Promise((_, rej) => setTimeout(() => rej(new Error('meta timeout')), 5000))
+                ]);
+            } catch(e) {
+                iosStream.getTracks().forEach(t => t.stop());
+                iosStream = null;
             }
-            e.target.value = '';
-        });
+        }
+
+        if (iosStream) {
+            video.play();
+            videoTrack = iosStream.getVideoTracks()[0];
+            if (videoTrack.getCapabilities?.()?.torch) {
+                document.getElementById('torch-btn').classList.remove('hidden');
+            }
+            loader.style.display = 'none';
+            frame.style.display  = 'block';
+            document.getElementById('status-label').textContent = '🔍 ZXing';
+
+            const hints = new Map([
+                [ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                    ZXing.BarcodeFormat.QR_CODE,   ZXing.BarcodeFormat.DATA_MATRIX,
+                    ZXing.BarcodeFormat.EAN_13,     ZXing.BarcodeFormat.EAN_8,
+                    ZXing.BarcodeFormat.CODE_128,   ZXing.BarcodeFormat.CODE_39,
+                    ZXing.BarcodeFormat.CODE_93,    ZXing.BarcodeFormat.UPC_A,
+                    ZXing.BarcodeFormat.UPC_E,      ZXing.BarcodeFormat.ITF,
+                ]],
+                [ZXing.DecodeHintType.TRY_HARDER, true],
+            ]);
+            const zxReader = new ZXing.MultiFormatReader();
+            zxReader.setHints(hints);
+            startScanLoop(() => {
+                const c = captureFrameRegion();
+                if (!c) return null;
+                const imgData = ctx.getImageData(0, 0, c.width, c.height);
+                try {
+                    const lum = new ZXing.RGBLuminanceSource(imgData.data, c.width, c.height);
+                    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+                    const res = zxReader.decode(bmp);
+                    const fmt = ZXing.BarcodeFormat[res.getBarcodeFormat()] || 'UNKNOWN';
+                    return { value: res.getText(), format: fmt };
+                } catch(e) { return null; }
+            });
+
+        } else {
+            /* camera unavailable — photo fallback */
+            loader.style.display = 'none';
+            const wrapper = document.getElementById('cam-wrapper');
+            wrapper.style.background = '#18222d';
+            wrapper.innerHTML = `
+                <input type="file" id="cam-file" accept="image/*" capture="environment" style="display:none">
+                <div style="display:flex;flex-direction:column;align-items:center;
+                            justify-content:center;height:100%;gap:12px;padding:0 16px;">
+                    <div style="font-size:50px">📷</div>
+                    <div style="color:#aaa;font-size:12px;text-align:center;line-height:1.5">
+                        Сфотографуйте один штрих-код або QR зблизька
+                    </div>
+                    <button id="ios-scan-btn"
+                        style="background:#2ea6ff;color:white;border:none;padding:14px 36px;
+                               border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;">
+                        📸 Сканувати
+                    </button>
+                    <div id="ios-dbg" style="color:#555;font-size:10px;max-width:92%;
+                         overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">очікування...</div>
+                </div>`;
+            document.getElementById('ios-scan-btn').addEventListener('click', () => {
+                document.getElementById('cam-file').click();
+            });
+            document.getElementById('cam-file').addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+                const dbg = document.getElementById('ios-dbg');
+                if (dbg) dbg.textContent = 'Обробка...';
+                try {
+                    const result = await decodeImageFile(file);
+                    if (dbg) dbg.textContent = '→ ' + result.value.substring(0, 50);
+                    handleDecoded(result);
+                    tg.HapticFeedback?.notificationOccurred('success');
+                } catch(err) {
+                    if (dbg) dbg.textContent = 'Код не знайдено — підійдіть ближче';
+                    tg.HapticFeedback?.notificationOccurred('error');
+                }
+                e.target.value = '';
+            });
+        }
 
     } else {
         /* ── Desktop / інше: ZBar WASM ── */
