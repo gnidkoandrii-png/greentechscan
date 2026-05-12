@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -14,29 +13,42 @@
             display: flex; flex-direction: column; height: 100vh; overflow: hidden;
         }
 
-        #reader-wrapper {
+        #cam-wrapper {
             width: 100%; height: 45vh; flex-shrink: 0; background: #000;
             border-bottom: 3px solid #2ea6ff; overflow: hidden;
             position: relative; transition: border 0.2s, box-shadow 0.2s;
         }
-        #reader { width: 100%; height: 100% !important; }
-        #reader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
-
-        /* Оверлей під час cooldown */
-        #cooldown-overlay {
-            position: absolute; inset: 0;
-            background: rgba(78, 205, 196, 0.12);
-            display: none; pointer-events: none;
+        #video {
+            width: 100%; height: 100%; object-fit: cover;
+            display: block;
         }
-        #cooldown-overlay.active { display: block; }
 
-        .error-flash {
-            border-bottom: 6px solid #ff3b30 !important;
-            box-shadow: inset 0 -10px 30px rgba(255,59,48,0.6) !important;
+        /* Рамка сканування */
+        #scan-frame {
+            position: absolute; top: 50%; left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px; height: 200px;
+            border: 2px solid rgba(46,166,255,0.7);
+            border-radius: 12px;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.35);
+            pointer-events: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
         }
-        .success-flash {
-            border-bottom: 6px solid #4ecdc4 !important;
-            box-shadow: inset 0 -10px 30px rgba(78,205,196,0.4) !important;
+        #scan-frame.hit {
+            border-color: #4ecdc4;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.35), inset 0 0 20px rgba(78,205,196,0.4);
+        }
+        #scan-frame.dup {
+            border-color: #ff3b30;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.35), inset 0 0 20px rgba(255,59,48,0.5);
+        }
+
+        /* Статус зверху */
+        #status-label {
+            position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+            background: rgba(0,0,0,0.55); color: #aaa;
+            font-size: 12px; padding: 3px 10px; border-radius: 20px;
+            white-space: nowrap; pointer-events: none;
         }
 
         /* Кнопки поверх камери */
@@ -52,7 +64,7 @@
             transition: background 0.2s, border-color 0.2s;
         }
         .cam-btn.torch-on { background: rgba(255,220,0,0.75); border-color: #ffd700; }
-        .cam-btn.hidden { display: none; }
+        .cam-btn.hidden    { display: none; }
 
         /* Нижня панель */
         .stats {
@@ -83,14 +95,13 @@
             cursor: pointer; padding-left: 15px; flex-shrink: 0;
         }
 
-        .btn {
+        .send-btn {
             background: #2ea6ff; color: white; border: none; padding: 16px;
             font-size: 18px; border-radius: 10px; width: 100%; display: none;
-            font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-            flex-shrink: 0;
+            font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); flex-shrink: 0;
         }
 
-        /* Модальне вікно ручного вводу */
+        /* Модальний ввід */
         #manual-modal {
             position: fixed; inset: 0; background: rgba(0,0,0,0.65);
             display: none; align-items: flex-end; z-index: 100;
@@ -114,13 +125,34 @@
         }
         .btn-cancel { background: #3a4a5a; color: #aaa; }
         .btn-add    { background: #2ea6ff; color: white; }
+
+        #loader {
+            position: absolute; inset: 0; background: #000;
+            display: flex; align-items: center; justify-content: center;
+            flex-direction: column; gap: 10px; color: #aaa; font-size: 14px;
+        }
+        .spinner {
+            width: 36px; height: 36px; border: 3px solid #2a3a4a;
+            border-top-color: #2ea6ff; border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
     </style>
 </head>
 <body>
 
-<div id="reader-wrapper">
-    <div id="reader"></div>
-    <div id="cooldown-overlay"></div>
+<div id="cam-wrapper">
+    <video id="video" autoplay playsinline muted></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <div id="loader">
+        <div class="spinner"></div>
+        <span id="loader-text">Ініціалізація...</span>
+    </div>
+
+    <div id="scan-frame" style="display:none;"></div>
+    <div id="status-label">Наведіть на код</div>
+
     <div id="cam-controls">
         <button class="cam-btn hidden" id="torch-btn" onclick="toggleTorch()" title="Ліхтарик">🔦</button>
         <button class="cam-btn" onclick="openManual()" title="Ввести вручну">⌨️</button>
@@ -135,14 +167,14 @@
     <div id="codes-list" class="codes-scroll">
         <p style="color:#aaa;margin:0;">Наведіть рамку на код(и)</p>
     </div>
-    <button class="btn" id="send-btn" onclick="sendData()">📤 НАДІСЛАТИ ДАНІ</button>
+    <button class="send-btn" id="send-btn" onclick="sendData()">📤 НАДІСЛАТИ ДАНІ</button>
 </div>
 
-<!-- Ручний ввід -->
 <div id="manual-modal">
     <div class="modal-box">
         <div class="modal-title">⌨️ Введіть серійний номер вручну</div>
-        <input type="text" id="manual-input" placeholder="Серійний номер..." autocomplete="off" autocorrect="off" spellcheck="false">
+        <input type="text" id="manual-input" placeholder="Серійний номер..."
+               autocomplete="off" autocorrect="off" spellcheck="false">
         <div class="modal-btns">
             <button class="btn-cancel" onclick="closeManual()">Скасувати</button>
             <button class="btn-add"    onclick="addManual()">Додати</button>
@@ -151,182 +183,229 @@
 </div>
 
 <script>
+(async () => {
     const tg = window.Telegram.WebApp;
     tg.expand();
 
+    const video    = document.getElementById('video');
+    const canvas   = document.getElementById('canvas');
+    const ctx      = canvas.getContext('2d', { willReadFrequently: true });
+    const loader   = document.getElementById('loader');
+    const loaderTx = document.getElementById('loader-text');
+    const frame    = document.getElementById('scan-frame');
+
     let scannedCodes  = [];
-    let lastErrorTime = 0;
     let lastScanTime  = 0;
-    const SCAN_COOLDOWN = 1500; // мс між успішними сканами
-    let torchOn        = false;
-    let torchSupported = false;
+    let lastErrTime   = 0;
+    const COOLDOWN    = 1500;
+    let torchOn       = false;
+    let videoTrack    = null;
+    let scanActive    = true;
 
-    /* ── Звук ─────────────────────────────────────── */
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    const audioCtx = new AudioContext();
-
-    function playSound(type) {
-        if (audioCtx.state === 'suspended') audioCtx.resume();
-        const osc  = audioCtx.createOscillator();
-        const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        if (type === 'success') {
-            osc.type = 'sine';
-            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
-            gain.gain.setValueAtTime(1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-            osc.start(audioCtx.currentTime);
-            osc.stop(audioCtx.currentTime + 0.1);
+    /* ── Звук ─────────────────────────────────── */
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    const actx = new AudioCtx();
+    function beep(ok) {
+        if (actx.state === 'suspended') actx.resume();
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.connect(g); g.connect(actx.destination);
+        if (ok) {
+            o.type = 'sine'; o.frequency.value = 1000;
+            g.gain.setValueAtTime(1, actx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.1);
+            o.start(); o.stop(actx.currentTime + 0.1);
         } else {
-            osc.type = 'sawtooth';
-            osc.frequency.setValueAtTime(200, audioCtx.currentTime);
-            gain.gain.setValueAtTime(1, audioCtx.currentTime);
-            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-            osc.start(audioCtx.currentTime);
-            osc.stop(audioCtx.currentTime + 0.3);
+            o.type = 'sawtooth'; o.frequency.value = 200;
+            g.gain.setValueAtTime(1, actx.currentTime);
+            g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.3);
+            o.start(); o.stop(actx.currentTime + 0.3);
         }
     }
 
-    /* ── UI ───────────────────────────────────────── */
+    /* ── UI ───────────────────────────────────── */
     function updateUI() {
-        const count    = scannedCodes.length;
-        const listDiv  = document.getElementById('codes-list');
-        const sendBtn  = document.getElementById('send-btn');
-        const clearBtn = document.getElementById('clear-btn');
-
-        document.getElementById('count-text').innerText = 'Відскановано: ' + count;
-
-        if (count === 0) {
-            listDiv.innerHTML = "<p style='color:#aaa;margin:0;'>Наведіть рамку на код(и)</p>";
-            sendBtn.style.display  = 'none';
-            clearBtn.style.display = 'none';
+        const n = scannedCodes.length;
+        document.getElementById('count-text').innerText = 'Відскановано: ' + n;
+        const list    = document.getElementById('codes-list');
+        const sendBtn = document.getElementById('send-btn');
+        const clrBtn  = document.getElementById('clear-btn');
+        if (n === 0) {
+            list.innerHTML = "<p style='color:#aaa;margin:0;'>Наведіть рамку на код(и)</p>";
+            sendBtn.style.display = clrBtn.style.display = 'none';
         } else {
-            listDiv.innerHTML = scannedCodes.map((code, i) => `
+            list.innerHTML = scannedCodes.map((c, i) => `
                 <div class="code-row">
-                    <span>${code}</span>
+                    <span>${c}</span>
                     <span class="del-btn" onclick="removeCode(${i})">✕</span>
                 </div>`).join('');
-            sendBtn.style.display  = 'block';
-            clearBtn.style.display = 'block';
+            sendBtn.style.display = clrBtn.style.display = 'block';
         }
     }
+    window.removeCode = i => { scannedCodes.splice(i, 1); tg.HapticFeedback?.impactOccurred('light'); updateUI(); };
+    function clearAll() { scannedCodes = []; tg.HapticFeedback?.impactOccurred('medium'); updateUI(); }
 
-    window.removeCode = function(i) {
-        scannedCodes.splice(i, 1);
-        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
-        updateUI();
-    };
+    function flashFrame(type) {
+        frame.classList.remove('hit', 'dup');
+        void frame.offsetWidth;
+        frame.classList.add(type);
+        setTimeout(() => frame.classList.remove(type), type === 'hit' ? COOLDOWN : 500);
+    }
 
-    function clearAll() {
-        scannedCodes = [];
-        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+    function handleCode(text) {
+        const now = Date.now();
+        if (!text || text.length < 4) return;
+        if (/^https?:\/\/|www\./i.test(text)) return;
+        if (!/\d/.test(text)) return;
+
+        if (scannedCodes.includes(text)) {
+            if (now - lastErrTime > 2000) {
+                lastErrTime = now;
+                beep(false);
+                tg.HapticFeedback?.notificationOccurred('error');
+                flashFrame('dup');
+            }
+            return;
+        }
+
+        if (now - lastScanTime < COOLDOWN) return;
+
+        lastScanTime = now;
+        scannedCodes.unshift(text);
+        beep(true);
+        tg.HapticFeedback?.notificationOccurred('success');
+        flashFrame('hit');
         updateUI();
     }
 
-    /* ── Сканер ───────────────────────────────────── */
-    const html5QrCode = new Html5Qrcode('reader');
+    /* ── Ініціалізація камери ─────────────────── */
+    loaderTx.textContent = 'Запит доступу до камери...';
+    let stream;
+    try {
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        });
+    } catch(e) {
+        loaderTx.textContent = 'Немає доступу до камери: ' + e.message;
+        return;
+    }
 
-    html5QrCode.start(
-        { facingMode: 'environment' },
-        { fps: 15, qrbox: { width: 230, height: 230 } },
+    video.srcObject = stream;
+    await new Promise(r => video.onloadedmetadata = r);
+    video.play();
 
-        (decodedText) => {
-            const now = Date.now();
-            if (now - lastScanTime < SCAN_COOLDOWN) return; // cooldown
+    // Torch
+    videoTrack = stream.getVideoTracks()[0];
+    const caps = videoTrack.getCapabilities?.() || {};
+    if (caps.torch) {
+        document.getElementById('torch-btn').classList.remove('hidden');
+    }
 
-            let addedAny = false, hasDuplicates = false;
+    loader.style.display = 'none';
+    frame.style.display  = 'block';
 
-            decodedText.split(/\s+/).forEach(sn => {
-                sn = sn.trim();
-                if (!sn || /^https?:\/\/|www\./i.test(sn)) return;
-                if (!/\d/.test(sn) || sn.length < 4) return;
-                if (!scannedCodes.includes(sn)) { scannedCodes.unshift(sn); addedAny = true; }
-                else hasDuplicates = true;
-            });
+    /* ── Вибір декодера ───────────────────────── */
+    let decode; // async () => string | null
 
-            if (addedAny) {
-                lastScanTime = now;
-                playSound('success');
-                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+    // 1. Нативний BarcodeDetector (Android Chrome / Chromium) — найшвидший
+    if ('BarcodeDetector' in window) {
+        const formats = ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39',
+                         'code_93', 'data_matrix', 'upc_a', 'upc_e', 'itf'];
+        let supported = [];
+        try { supported = await BarcodeDetector.getSupportedFormats(); } catch(e) {}
+        const use = formats.filter(f => supported.includes(f));
+        const bd  = new BarcodeDetector({ formats: use.length ? use : ['qr_code', 'ean_13', 'code_128'] });
+        document.getElementById('status-label').textContent = '⚡ Native decoder';
+        decode = async () => {
+            const res = await bd.detect(video);
+            return res.length ? res[0].rawValue : null;
+        };
 
-                const wrap    = document.getElementById('reader-wrapper');
-                const overlay = document.getElementById('cooldown-overlay');
-                wrap.classList.add('success-flash');
-                overlay.classList.add('active');
-                setTimeout(() => {
-                    wrap.classList.remove('success-flash');
-                    overlay.classList.remove('active');
-                }, SCAN_COOLDOWN);
+    // 2. ZBar WASM — iOS / Firefox / інші
+    } else {
+        loaderTx.textContent = 'Завантаження ZBar...';
+        loader.style.display = 'flex';
+        frame.style.display  = 'none';
 
-                updateUI();
-
-            } else if (hasDuplicates && now - lastErrorTime > 2000) {
-                lastErrorTime = now;
-                playSound('error');
-                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                const wrap = document.getElementById('reader-wrapper');
-                wrap.classList.add('error-flash');
-                setTimeout(() => wrap.classList.remove('error-flash'), 500);
-            }
-        },
-        () => {} // scan errors — ігноруємо
-
-    ).then(() => {
+        let scanImageData;
         try {
-            const caps = html5QrCode.getRunningTrackCapabilities();
-            if (caps && caps.torch) {
-                torchSupported = true;
-                document.getElementById('torch-btn').classList.remove('hidden');
-            }
-        } catch(e) {}
-    }).catch(err => {
-        document.getElementById('codes-list').innerHTML =
-            `<p style='color:#ff3b30;'>Помилка камери: ${err}</p>`;
-    });
+            const mod = await import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.9.15/dist/main.mjs');
+            scanImageData = mod.scanImageData;
+        } catch(e) {
+            loaderTx.textContent = 'Помилка завантаження ZBar: ' + e.message;
+            return;
+        }
 
-    /* ── Ліхтарик ────────────────────────────────── */
-    async function toggleTorch() {
-        if (!torchSupported) return;
+        loader.style.display = 'none';
+        frame.style.display  = 'block';
+        document.getElementById('status-label').textContent = '🔍 ZBar WASM';
+
+        decode = async () => {
+            if (video.videoWidth === 0) return null;
+            canvas.width  = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const symbols = await scanImageData(imgData);
+            return symbols.length ? symbols[0].decode() : null;
+        };
+    }
+
+    /* ── Цикл сканування ──────────────────────── */
+    let processing = false;
+    async function scanLoop() {
+        if (!scanActive) return;
+        if (!processing && video.readyState >= 2) {
+            processing = true;
+            try {
+                const result = await decode();
+                if (result) handleCode(result.trim());
+            } catch(e) {}
+            processing = false;
+        }
+        requestAnimationFrame(scanLoop);
+    }
+    scanLoop();
+
+    /* ── Ліхтарик ─────────────────────────────── */
+    window.toggleTorch = async () => {
+        if (!videoTrack) return;
         torchOn = !torchOn;
         try {
-            await html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchOn }] });
+            await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
             document.getElementById('torch-btn').classList.toggle('torch-on', torchOn);
-            if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+            tg.HapticFeedback?.impactOccurred('light');
         } catch(e) { torchOn = !torchOn; }
-    }
+    };
 
-    /* ── Ручний ввід ─────────────────────────────── */
-    function openManual() {
+    /* ── Ручний ввід ──────────────────────────── */
+    window.openManual = () => {
         document.getElementById('manual-modal').classList.add('open');
         setTimeout(() => document.getElementById('manual-input').focus(), 100);
-    }
-    function closeManual() {
+    };
+    window.closeManual = () => {
         document.getElementById('manual-modal').classList.remove('open');
         document.getElementById('manual-input').value = '';
-    }
-    function addManual() {
+    };
+    window.addManual = () => {
         const val = document.getElementById('manual-input').value.trim();
-        if (!val) return;
-        if (!scannedCodes.includes(val)) {
-            scannedCodes.unshift(val);
-            playSound('success');
-            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-            updateUI();
-        }
+        if (val) handleCode(val);
         closeManual();
-    }
+    };
     document.getElementById('manual-input').addEventListener('keydown', e => {
         if (e.key === 'Enter') addManual();
     });
 
-    /* ── Відправка ───────────────────────────────── */
-    function sendData() {
+    /* ── Відправка ────────────────────────────── */
+    window.sendData = () => {
         if (scannedCodes.length > 0) {
             tg.sendData(scannedCodes.join('|'));
             tg.close();
         }
-    }
+    };
+
+    window.clearAll = clearAll;
+
+})();
 </script>
 </body>
 </html>
