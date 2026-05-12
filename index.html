@@ -336,16 +336,23 @@
     loaderTx.textContent = 'Запит доступу до камери...';
     let stream;
     try {
-        stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
+        const camPromise = navigator.mediaDevices.getUserMedia({
+            video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
         });
+        stream = await Promise.race([
+            camPromise,
+            new Promise((_, rej) => setTimeout(() => rej(new Error('Час очікування вичерпано')), 12000))
+        ]);
     } catch(e) {
         loaderTx.textContent = 'Немає доступу до камери: ' + e.message;
         return;
     }
     video.srcObject = stream;
-    await new Promise(r => video.onloadedmetadata = r);
-    video.play();
+    video.play().catch(() => {});
+    await new Promise(r => {
+        if (video.readyState >= 1) r();
+        else video.addEventListener('loadedmetadata', r, { once: true });
+    });
 
     videoTrack = stream.getVideoTracks()[0];
     if (videoTrack.getCapabilities?.()?.torch) {
