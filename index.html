@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -374,21 +375,7 @@
         };
 
     } else {
-        // Завантажуємо ZXing через звичайний <script> — працює на iOS WKWebView
-        loaderTx.textContent = 'Завантаження сканера...';
-        loader.style.display = 'flex';
-        frame.style.display  = 'none';
-
-        await new Promise((resolve, reject) => {
-            const s = document.createElement('script');
-            s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js';
-            s.onload = resolve;
-            s.onerror = () => reject(new Error('Не вдалося завантажити ZXing'));
-            document.head.appendChild(s);
-        }).catch(e => { loaderTx.textContent = 'Помилка: ' + e.message; throw e; });
-
-        loader.style.display = 'none';
-        frame.style.display  = 'block';
+        // ZXing завантажено статично в <head>
         document.getElementById('status-label').textContent = '🔍 ZXing JS';
 
         const hints = new Map();
