@@ -305,8 +305,35 @@
     function handleDecoded({ value: text, format }) {
         const now = Date.now();
         if (!text || text.length < 3) return;
+
+        // Ignore URL QR codes
+        if (/^https?:\/\//i.test(text) || /^www\./i.test(text)) return;
+
         const is2D = IS_2D.has(format) || (typeof format === 'string' && format.toLowerCase().includes('qr'));
         setFrameMode(is2D ? 'qr' : 'barcode', true);
+
+        // Split multi-serial QR codes (newline / comma / semicolon delimited)
+        const parts = text.split(/[\r\n,;]+/).map(s => s.trim()).filter(s => s.length >= 3);
+
+        if (parts.length > 1) {
+            if (now - lastScanTime < COOLDOWN) return;
+            lastScanTime = now;
+            const newParts = parts.filter(p => !scannedCodes.includes(p));
+            if (newParts.length > 0) {
+                scannedCodes.unshift(...newParts);
+                beep(true);
+                tg.HapticFeedback?.notificationOccurred('success');
+                flashFrame('hit');
+                updateUI();
+            } else {
+                if (now - lastErrTime > 2000) {
+                    lastErrTime = now; beep(false);
+                    tg.HapticFeedback?.notificationOccurred('error'); flashFrame('dup');
+                }
+            }
+            return;
+        }
+
         if (scannedCodes.includes(text)) {
             if (now - lastErrTime > 2000) {
                 lastErrTime = now; beep(false);
