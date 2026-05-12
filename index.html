@@ -6,6 +6,7 @@
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -146,6 +147,13 @@
             animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* html5-qrcode override for iOS */
+        #ios-reader { width: 100%; height: 100%; }
+        #ios-reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
+        #ios-reader img { display: none !important; }
+        #ios-reader__dashboard { display: none !important; }
+        #ios-reader__scan_region { width: 100% !important; height: 100% !important; }
     </style>
 </head>
 <body>
@@ -426,140 +434,36 @@
         });
 
     } else if (typeof tg.showScanQrPopup === 'function') {
-        /* ── iOS Telegram ──
-           iOS 17+: getUserMedia + ImageCapture.grabFrame() bypasses canvas
-                    SecurityError → live ZXing scan works.
-           iOS <17:  native showScanQrPopup (QR) + photo file input (barcodes). */
+        /* ── iOS Telegram: html5-qrcode handles iOS WKWebView internally ── */
+        const wrapper = document.getElementById('cam-wrapper');
+        wrapper.innerHTML = '<div id="ios-reader"></div>';
+        loader.style.display = 'none';
 
-        const hasImageCapture = typeof ImageCapture !== 'undefined';
-        let iosLiveOk = false;
-
-        if (hasImageCapture) {
-            try {
-                loaderTx.textContent = 'Запит до камери...';
-                const iosStream = await Promise.race([
-                    navigator.mediaDevices.getUserMedia({
-                        video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
-                    }),
-                    new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 6000))
-                ]);
-                video.srcObject = iosStream;
-                await Promise.race([
-                    new Promise(r => { video.onloadedmetadata = r; }),
-                    new Promise((_, rej) => setTimeout(() => rej(new Error('meta')), 4000))
-                ]);
-                video.play();
-                videoTrack = iosStream.getVideoTracks()[0];
-                loader.style.display = 'none';
-                frame.style.display  = 'block';
-                document.getElementById('status-label').textContent = '🔍 iOS Live';
-                iosLiveOk = true;
-
-                const imageCapture = new ImageCapture(videoTrack);
-                const hints = new Map([
-                    [ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-                        ZXing.BarcodeFormat.QR_CODE,   ZXing.BarcodeFormat.DATA_MATRIX,
-                        ZXing.BarcodeFormat.EAN_13,     ZXing.BarcodeFormat.EAN_8,
-                        ZXing.BarcodeFormat.CODE_128,   ZXing.BarcodeFormat.CODE_39,
-                        ZXing.BarcodeFormat.CODE_93,    ZXing.BarcodeFormat.UPC_A,
-                        ZXing.BarcodeFormat.UPC_E,      ZXing.BarcodeFormat.ITF,
-                    ]],
-                    [ZXing.DecodeHintType.TRY_HARDER, true],
-                ]);
-                const zxReader = new ZXing.MultiFormatReader();
-                zxReader.setHints(hints);
-
-                let busy = false;
-                (async function loop() {
-                    while (true) {
-                        if (!busy) {
-                            busy = true;
-                            try {
-                                const bitmap = await imageCapture.grabFrame();
-                                // Crop to scan frame (same math as captureFrameRegion)
-                                const fw = frame.offsetWidth,  fh = frame.offsetHeight;
-                                const vw = video.offsetWidth,  vh = video.offsetHeight;
-                                const sx = Math.round((vw / 2 - fw / 2) * (bitmap.width  / vw));
-                                const sy = Math.round((vh / 2 - fh / 2) * (bitmap.height / vh));
-                                const sw = Math.round(fw * (bitmap.width  / vw));
-                                const sh = Math.round(fh * (bitmap.height / vh));
-                                canvas.width = sw; canvas.height = sh;
-                                ctx.drawImage(bitmap, sx, sy, sw, sh, 0, 0, sw, sh);
-                                bitmap.close();
-                                const imgData = ctx.getImageData(0, 0, sw, sh);
-                                try {
-                                    const lum = new ZXing.RGBLuminanceSource(imgData.data, sw, sh);
-                                    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-                                    const res = zxReader.decode(bmp);
-                                    const fmt = ZXing.BarcodeFormat[res.getBarcodeFormat()] || 'UNKNOWN';
-                                    handleDecoded({ value: res.getText(), format: fmt });
-                                } catch(e) {}
-                            } catch(e) {}
-                            busy = false;
-                        }
-                        await new Promise(r => requestAnimationFrame(r));
-                    }
-                })();
-            } catch(e) {
-                loader.style.display = 'none';
-                iosLiveOk = false;
-            }
+        const formats = [];
+        if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
+            const f = Html5QrcodeSupportedFormats;
+            formats.push(f.QR_CODE, f.EAN_13, f.EAN_8, f.CODE_128,
+                         f.CODE_39, f.CODE_93, f.UPC_A, f.UPC_E, f.ITF, f.DATA_MATRIX);
         }
 
-        if (!iosLiveOk) {
-            /* iOS <17 fallback: native QR popup + photo for barcodes */
-            loader.style.display = 'none';
-            const wrapper = document.getElementById('cam-wrapper');
-            wrapper.style.background = '#18222d';
-            wrapper.innerHTML = `
-                <input type="file" id="cam-file" accept="image/*" capture="environment" style="display:none">
-                <div style="display:flex;flex-direction:column;align-items:center;
-                            justify-content:center;height:100%;gap:14px;padding:0 24px;">
-                    <div style="font-size:40px">📷</div>
-                    <button id="ios-qr-btn"
-                        style="background:#2ea6ff;color:white;border:none;padding:15px 0;
-                               border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;width:100%;">
-                        📷 Сканувати QR-код
-                    </button>
-                    <button id="ios-bar-btn"
-                        style="background:#2a3a4a;color:white;border:2px solid #3a5a6a;padding:15px 0;
-                               border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;width:100%;">
-                        📸 Сканувати штрих-код (фото)
-                    </button>
-                    <div id="ios-dbg" style="color:#666;font-size:11px;text-align:center;line-height:1.5;">
-                        Оберіть спосіб сканування
-                    </div>
-                </div>`;
+        const iosScanner = new Html5Qrcode('ios-reader', {
+            formatsToSupport: formats.length ? formats : undefined,
+            verbose: false
+        });
 
-            document.getElementById('ios-qr-btn').addEventListener('click', () => {
-                tg.showScanQrPopup({ text: 'Наведіть на QR-код' }, (result) => {
-                    if (result) {
-                        handleDecoded({ value: result, format: 'QR_CODE' });
-                        tg.closeScanQrPopup();
-                    }
-                });
-            });
-
-            document.getElementById('ios-bar-btn').addEventListener('click', () => {
-                document.getElementById('cam-file').click();
-            });
-
-            document.getElementById('cam-file').addEventListener('change', async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-                const dbg = document.getElementById('ios-dbg');
-                if (dbg) dbg.textContent = 'Обробка...';
-                try {
-                    const result = await decodeImageFile(file);
-                    if (dbg) dbg.textContent = '✅ ' + result.value.substring(0, 45);
-                    handleDecoded(result);
-                    tg.HapticFeedback?.notificationOccurred('success');
-                } catch(err) {
-                    if (dbg) dbg.textContent = '❌ Код не розпізнано — підійдіть ближче';
-                    tg.HapticFeedback?.notificationOccurred('error');
-                }
-                e.target.value = '';
-            });
+        try {
+            await iosScanner.start(
+                { facingMode: 'environment' },
+                { fps: 12, qrbox: { width: 260, height: 130 }, aspectRatio: 1.777 },
+                (text) => { handleDecoded({ value: text, format: 'unknown' }); },
+                () => {}
+            );
+            document.getElementById('status-label')?.remove();
+            frame.style.display = 'none';
+        } catch(e) {
+            wrapper.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;
+                height:100%;color:#ff3b30;font-size:13px;padding:20px;text-align:center;">
+                ❌ Камера недоступна: ${e.message || e}</div>`;
         }
 
     } else {
