@@ -454,8 +454,11 @@
         try {
             await iosScanner.start(
                 { facingMode: 'environment' },
-                { fps: 12, qrbox: { width: 260, height: 130 }, aspectRatio: 1.777 },
-                (text) => { handleDecoded({ value: text, format: 'unknown' }); },
+                { fps: 10, aspectRatio: 1.777 },
+                (text, result) => {
+                    const fmt = result?.result?.format?.formatName || 'unknown';
+                    handleDecoded({ value: text, format: fmt });
+                },
                 () => {}
             );
             document.getElementById('status-label')?.remove();
