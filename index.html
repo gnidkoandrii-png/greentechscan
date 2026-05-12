@@ -202,8 +202,8 @@
 
 <script>
 (async () => {
-    const tg = window.Telegram.WebApp;
-    tg.expand();
+    const tg = window.Telegram?.WebApp || { expand:()=>{}, HapticFeedback:null, sendData:()=>{}, close:()=>{} };
+    try { tg.expand(); } catch(e) {}
 
     const video    = document.getElementById('video');
     const canvas   = document.getElementById('canvas');
@@ -261,10 +261,12 @@
     }
 
     /* ── Звук ─────────────────────────────────── */
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const actx = new AudioCtx();
+    let actx = null;
     function beep(ok) {
-        if (actx.state === 'suspended') actx.resume();
+        try {
+            if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+            if (actx.state === 'suspended') actx.resume();
+        } catch(e) { return; }
         const o = actx.createOscillator(), g = actx.createGain();
         o.connect(g); g.connect(actx.destination);
         if (ok) {
@@ -333,16 +335,22 @@
     }
 
     /* ── Камера ───────────────────────────────── */
+    // iOS WKWebView blocks getUserMedia without user gesture — require a tap first
+    loaderTx.textContent = 'Натисніть для запуску';
+    const startBtn = document.createElement('button');
+    startBtn.textContent = '▶ Відкрити камеру';
+    startBtn.style.cssText = 'background:#2ea6ff;color:white;border:none;padding:14px 28px;' +
+        'border-radius:10px;font-size:16px;font-weight:bold;cursor:pointer;margin-top:14px;';
+    loader.appendChild(startBtn);
+    await new Promise(r => startBtn.addEventListener('click', r, { once: true }));
+    startBtn.remove();
+
     loaderTx.textContent = 'Запит доступу до камери...';
     let stream;
     try {
-        const camPromise = navigator.mediaDevices.getUserMedia({
+        stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
         });
-        stream = await Promise.race([
-            camPromise,
-            new Promise((_, rej) => setTimeout(() => rej(new Error('Час очікування вичерпано')), 12000))
-        ]);
     } catch(e) {
         loaderTx.textContent = 'Немає доступу до камери: ' + e.message;
         return;
