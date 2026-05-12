@@ -295,9 +295,7 @@
     /* ── Обробка декодованого ─────────────────── */
     function handleDecoded({ value: text, format }) {
         const now = Date.now();
-        if (!text || text.length < 4) return;
-        if (/^https?:\/\/|www\./i.test(text)) return;
-        if (!/\d/.test(text)) return;
+        if (!text || text.length < 3) return;
         const is2D = IS_2D.has(format) || (typeof format === 'string' && format.toLowerCase().includes('qr'));
         setFrameMode(is2D ? 'qr' : 'barcode', true);
         if (scannedCodes.includes(text)) {
@@ -381,12 +379,18 @@
                            border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;">
                     ▶ Сканувати
                 </button>
-                <div style="color:#3a4a5a;font-size:11px">Telegram Scanner · iOS</div>
+                <div id="ios-dbg" style="color:#666;font-size:10px;max-width:92%;
+                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                    очікування...
+                </div>
             </div>`;
         document.getElementById('ios-scan-btn').addEventListener('click', () => {
+            document.getElementById('ios-dbg').textContent = 'popup відкрито...';
             tg.showScanQrPopup({ text: 'Наведіть на QR-код або штрих-код' }, (result) => {
+                const dbg = document.getElementById('ios-dbg');
+                if (dbg) dbg.textContent = result ? ('→ ' + result.substring(0, 50)) : 'callback: null';
                 if (result) handleDecoded({ value: result, format: 'QR_CODE' });
-                return false; // залишати popup відкритим
+                return false;
             });
             tg.HapticFeedback?.impactOccurred('light');
         });
