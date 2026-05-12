@@ -5,169 +5,328 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
-        body { background: #18222d; color: white; text-align: center; margin: 0; padding: 0; font-family: sans-serif; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        
-        #reader-wrapper { width: 100%; height: 45vh; flex-shrink: 0; background: #000; border-bottom: 3px solid #2ea6ff; overflow: hidden; position: relative; transition: border 0.2s, box-shadow 0.2s; }
-        
+        * { box-sizing: border-box; }
+        body {
+            background: #18222d; color: white; text-align: center;
+            margin: 0; padding: 0; font-family: sans-serif;
+            display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+        }
+
+        #reader-wrapper {
+            width: 100%; height: 45vh; flex-shrink: 0; background: #000;
+            border-bottom: 3px solid #2ea6ff; overflow: hidden;
+            position: relative; transition: border 0.2s, box-shadow 0.2s;
+        }
         #reader { width: 100%; height: 100% !important; }
         #reader video { object-fit: cover !important; width: 100% !important; height: 100% !important; }
-        
-        .error-flash { border-bottom: 6px solid #ff3b30 !important; box-shadow: inset 0 -10px 30px rgba(255, 59, 48, 0.6) !important; }
 
-        .stats { height: 55vh; padding: 15px; display: flex; flex-direction: column; background: #18222d; box-sizing: border-box; }
-        
-        .codes-scroll { flex-grow: 1; overflow-y: auto; margin-top: 10px; padding-right: 5px; margin-bottom: 10px; }
-        
-        .code-row { 
-            display: flex; justify-content: space-between; align-items: center; 
-            background: #243447; padding: 10px 15px; margin-bottom: 8px; 
-            border-radius: 8px; border-left: 3px solid #4caf50;
-            font-family: monospace; font-size: 16px; word-break: break-all; text-align: left;
+        /* Оверлей під час cooldown */
+        #cooldown-overlay {
+            position: absolute; inset: 0;
+            background: rgba(78, 205, 196, 0.12);
+            display: none; pointer-events: none;
         }
-        
-        .del-btn { color: #ff3b30; font-size: 22px; font-weight: bold; cursor: pointer; padding-left: 15px; }
+        #cooldown-overlay.active { display: block; }
 
-        /* Трохи підправив відступи, щоб кнопка гарно сиділа внизу */
-        .btn { background: #2ea6ff; color: white; border: none; padding: 16px; font-size: 18px; border-radius: 10px; width: 100%; display: none; font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000; flex-shrink: 0; margin-top: 5px; }
+        .error-flash {
+            border-bottom: 6px solid #ff3b30 !important;
+            box-shadow: inset 0 -10px 30px rgba(255,59,48,0.6) !important;
+        }
+        .success-flash {
+            border-bottom: 6px solid #4ecdc4 !important;
+            box-shadow: inset 0 -10px 30px rgba(78,205,196,0.4) !important;
+        }
+
+        /* Кнопки поверх камери */
+        #cam-controls {
+            position: absolute; top: 10px; right: 10px;
+            display: flex; flex-direction: column; gap: 8px; z-index: 10;
+        }
+        .cam-btn {
+            width: 44px; height: 44px; border-radius: 50%;
+            background: rgba(0,0,0,0.55); border: 2px solid rgba(255,255,255,0.25);
+            color: white; font-size: 20px; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .cam-btn.torch-on { background: rgba(255,220,0,0.75); border-color: #ffd700; }
+        .cam-btn.hidden { display: none; }
+
+        /* Нижня панель */
+        .stats {
+            flex: 1; padding: 12px 12px 10px;
+            display: flex; flex-direction: column; min-height: 0;
+        }
+        .top-bar {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 8px; flex-shrink: 0;
+        }
+        #count-text { color: #4caf50; margin: 0; font-size: 18px; font-weight: bold; }
+        .icon-btn {
+            background: #2a3a4a; border: none; color: #ccc;
+            border-radius: 8px; padding: 7px 13px; font-size: 18px; cursor: pointer;
+        }
+        .icon-btn:active { background: #1a2a3a; }
+
+        .codes-scroll { flex: 1; overflow-y: auto; margin-bottom: 8px; padding-right: 4px; }
+
+        .code-row {
+            display: flex; justify-content: space-between; align-items: center;
+            background: #243447; padding: 10px 15px; margin-bottom: 8px;
+            border-radius: 8px; border-left: 3px solid #4caf50;
+            font-family: monospace; font-size: 15px; word-break: break-all; text-align: left;
+        }
+        .del-btn {
+            color: #ff3b30; font-size: 22px; font-weight: bold;
+            cursor: pointer; padding-left: 15px; flex-shrink: 0;
+        }
+
+        .btn {
+            background: #2ea6ff; color: white; border: none; padding: 16px;
+            font-size: 18px; border-radius: 10px; width: 100%; display: none;
+            font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            flex-shrink: 0;
+        }
+
+        /* Модальне вікно ручного вводу */
+        #manual-modal {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+            display: none; align-items: flex-end; z-index: 100;
+        }
+        #manual-modal.open { display: flex; }
+        .modal-box {
+            background: #243447; width: 100%; padding: 20px;
+            border-radius: 16px 16px 0 0; border-top: 2px solid #2ea6ff;
+        }
+        .modal-title { font-size: 15px; font-weight: bold; margin-bottom: 12px; color: #2ea6ff; }
+        #manual-input {
+            width: 100%; padding: 13px; font-size: 16px; font-family: monospace;
+            background: #18222d; color: white; border: 2px solid #3a4a5a;
+            border-radius: 8px; outline: none; margin-bottom: 12px; letter-spacing: 1px;
+        }
+        #manual-input:focus { border-color: #2ea6ff; }
+        .modal-btns { display: flex; gap: 10px; }
+        .modal-btns button {
+            flex: 1; padding: 14px; border-radius: 8px; border: none;
+            font-size: 16px; font-weight: bold; cursor: pointer;
+        }
+        .btn-cancel { background: #3a4a5a; color: #aaa; }
+        .btn-add    { background: #2ea6ff; color: white; }
     </style>
 </head>
 <body>
-    <div id="reader-wrapper">
-        <div id="reader"></div>
+
+<div id="reader-wrapper">
+    <div id="reader"></div>
+    <div id="cooldown-overlay"></div>
+    <div id="cam-controls">
+        <button class="cam-btn hidden" id="torch-btn" onclick="toggleTorch()" title="Ліхтарик">🔦</button>
+        <button class="cam-btn" onclick="openManual()" title="Ввести вручну">⌨️</button>
     </div>
-    
-    <div class="stats">
-        <h2 id="count-text" style="color: #4caf50; margin: 0 0 5px 0;">Відскановано: 0</h2>
-        
-        <div id="codes-list" class="codes-scroll">
-            <p style="color: #aaa; margin: 0;">Наведіть рамку на код(и)</p>
+</div>
+
+<div class="stats">
+    <div class="top-bar">
+        <h2 id="count-text">Відскановано: 0</h2>
+        <button class="icon-btn" id="clear-btn" style="display:none" onclick="clearAll()">🗑</button>
+    </div>
+    <div id="codes-list" class="codes-scroll">
+        <p style="color:#aaa;margin:0;">Наведіть рамку на код(и)</p>
+    </div>
+    <button class="btn" id="send-btn" onclick="sendData()">📤 НАДІСЛАТИ ДАНІ</button>
+</div>
+
+<!-- Ручний ввід -->
+<div id="manual-modal">
+    <div class="modal-box">
+        <div class="modal-title">⌨️ Введіть серійний номер вручну</div>
+        <input type="text" id="manual-input" placeholder="Серійний номер..." autocomplete="off" autocorrect="off" spellcheck="false">
+        <div class="modal-btns">
+            <button class="btn-cancel" onclick="closeManual()">Скасувати</button>
+            <button class="btn-add"    onclick="addManual()">Додати</button>
         </div>
-        
-        <button class="btn" id="send-btn" onclick="sendData()">📤 ПЕРЕДАТИ В БОТ</button>
     </div>
+</div>
 
-    <script>
-        let tg = window.Telegram.WebApp;
-        tg.expand();
-        
-        let scannedCodes = []; 
-        let lastErrorTime = 0; 
-        
-        const AudioContext = window.AudioContext || window.webkitAudioContext;
-        const audioCtx = new AudioContext();
+<script>
+    const tg = window.Telegram.WebApp;
+    tg.expand();
 
-        function playSound(type) {
-            if (audioCtx.state === 'suspended') audioCtx.resume();
-            const oscillator = audioCtx.createOscillator();
-            const gainNode = audioCtx.createGain();
-            oscillator.connect(gainNode);
-            gainNode.connect(audioCtx.destination);
-            
-            if (type === 'success') {
-                oscillator.type = 'sine';
-                oscillator.frequency.setValueAtTime(1000, audioCtx.currentTime); 
-                gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
-                oscillator.start(audioCtx.currentTime);
-                oscillator.stop(audioCtx.currentTime + 0.1);
-            } else if (type === 'error') {
-                oscillator.type = 'sawtooth';
-                oscillator.frequency.setValueAtTime(200, audioCtx.currentTime); 
-                gainNode.gain.setValueAtTime(1, audioCtx.currentTime);
-                gainNode.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
-                oscillator.start(audioCtx.currentTime);
-                oscillator.stop(audioCtx.currentTime + 0.3);
-            }
+    let scannedCodes  = [];
+    let lastErrorTime = 0;
+    let lastScanTime  = 0;
+    const SCAN_COOLDOWN = 1500; // мс між успішними сканами
+    let torchOn        = false;
+    let torchSupported = false;
+
+    /* ── Звук ─────────────────────────────────────── */
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    const audioCtx = new AudioContext();
+
+    function playSound(type) {
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const osc  = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        if (type === 'success') {
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(1000, audioCtx.currentTime);
+            gain.gain.setValueAtTime(1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.1);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.1);
+        } else {
+            osc.type = 'sawtooth';
+            osc.frequency.setValueAtTime(200, audioCtx.currentTime);
+            gain.gain.setValueAtTime(1, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.3);
+            osc.start(audioCtx.currentTime);
+            osc.stop(audioCtx.currentTime + 0.3);
         }
+    }
 
-        function updateUI() {
-            document.getElementById('count-text').innerText = "Відскановано: " + scannedCodes.length;
-            const listDiv = document.getElementById('codes-list');
-            const btn = document.getElementById('send-btn');
-            
-            if (scannedCodes.length === 0) {
-                listDiv.innerHTML = "<p style='color: #aaa; margin: 0;'>Наведіть рамку на код(и)</p>";
-                btn.style.display = "none";
-            } else {
-                listDiv.innerHTML = scannedCodes.map((code, index) => `
-                    <div class="code-row">
-                        <span>${code}</span>
-                        <span class="del-btn" onclick="removeCode(${index})">✕</span>
-                    </div>
-                `).join('');
-                btn.style.display = "block";
-            }
+    /* ── UI ───────────────────────────────────────── */
+    function updateUI() {
+        const count    = scannedCodes.length;
+        const listDiv  = document.getElementById('codes-list');
+        const sendBtn  = document.getElementById('send-btn');
+        const clearBtn = document.getElementById('clear-btn');
+
+        document.getElementById('count-text').innerText = 'Відскановано: ' + count;
+
+        if (count === 0) {
+            listDiv.innerHTML = "<p style='color:#aaa;margin:0;'>Наведіть рамку на код(и)</p>";
+            sendBtn.style.display  = 'none';
+            clearBtn.style.display = 'none';
+        } else {
+            listDiv.innerHTML = scannedCodes.map((code, i) => `
+                <div class="code-row">
+                    <span>${code}</span>
+                    <span class="del-btn" onclick="removeCode(${i})">✕</span>
+                </div>`).join('');
+            sendBtn.style.display  = 'block';
+            clearBtn.style.display = 'block';
         }
+    }
 
-        window.removeCode = function(index) {
-            scannedCodes.splice(index, 1);
+    window.removeCode = function(i) {
+        scannedCodes.splice(i, 1);
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        updateUI();
+    };
+
+    function clearAll() {
+        scannedCodes = [];
+        if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('medium');
+        updateUI();
+    }
+
+    /* ── Сканер ───────────────────────────────────── */
+    const html5QrCode = new Html5Qrcode('reader');
+
+    html5QrCode.start(
+        { facingMode: 'environment' },
+        { fps: 15, qrbox: { width: 230, height: 230 } },
+
+        (decodedText) => {
+            const now = Date.now();
+            if (now - lastScanTime < SCAN_COOLDOWN) return; // cooldown
+
+            let addedAny = false, hasDuplicates = false;
+
+            decodedText.split(/\s+/).forEach(sn => {
+                sn = sn.trim();
+                if (!sn || /^https?:\/\/|www\./i.test(sn)) return;
+                if (!/\d/.test(sn) || sn.length < 4) return;
+                if (!scannedCodes.includes(sn)) { scannedCodes.unshift(sn); addedAny = true; }
+                else hasDuplicates = true;
+            });
+
+            if (addedAny) {
+                lastScanTime = now;
+                playSound('success');
+                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
+
+                const wrap    = document.getElementById('reader-wrapper');
+                const overlay = document.getElementById('cooldown-overlay');
+                wrap.classList.add('success-flash');
+                overlay.classList.add('active');
+                setTimeout(() => {
+                    wrap.classList.remove('success-flash');
+                    overlay.classList.remove('active');
+                }, SCAN_COOLDOWN);
+
+                updateUI();
+
+            } else if (hasDuplicates && now - lastErrorTime > 2000) {
+                lastErrorTime = now;
+                playSound('error');
+                if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
+                const wrap = document.getElementById('reader-wrapper');
+                wrap.classList.add('error-flash');
+                setTimeout(() => wrap.classList.remove('error-flash'), 500);
+            }
+        },
+        () => {} // scan errors — ігноруємо
+
+    ).then(() => {
+        try {
+            const caps = html5QrCode.getRunningTrackCapabilities();
+            if (caps && caps.torch) {
+                torchSupported = true;
+                document.getElementById('torch-btn').classList.remove('hidden');
+            }
+        } catch(e) {}
+    }).catch(err => {
+        document.getElementById('codes-list').innerHTML =
+            `<p style='color:#ff3b30;'>Помилка камери: ${err}</p>`;
+    });
+
+    /* ── Ліхтарик ────────────────────────────────── */
+    async function toggleTorch() {
+        if (!torchSupported) return;
+        torchOn = !torchOn;
+        try {
+            await html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchOn }] });
+            document.getElementById('torch-btn').classList.toggle('torch-on', torchOn);
             if (tg.HapticFeedback) tg.HapticFeedback.impactOccurred('light');
+        } catch(e) { torchOn = !torchOn; }
+    }
+
+    /* ── Ручний ввід ─────────────────────────────── */
+    function openManual() {
+        document.getElementById('manual-modal').classList.add('open');
+        setTimeout(() => document.getElementById('manual-input').focus(), 100);
+    }
+    function closeManual() {
+        document.getElementById('manual-modal').classList.remove('open');
+        document.getElementById('manual-input').value = '';
+    }
+    function addManual() {
+        const val = document.getElementById('manual-input').value.trim();
+        if (!val) return;
+        if (!scannedCodes.includes(val)) {
+            scannedCodes.unshift(val);
+            playSound('success');
+            if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
             updateUI();
-        };
-
-        const html5QrCode = new Html5Qrcode("reader");
-        
-        const config = { 
-            fps: 15, 
-            qrbox: { width: 230, height: 230 } 
-        };
-
-        html5QrCode.start(
-            { facingMode: "environment" }, 
-            config,
-            (decodedText) => {
-                let serials = decodedText.split(/\s+/);
-                let addedAny = false;
-                let hasDuplicates = false;
-
-                serials.forEach(sn => {
-                    sn = sn.trim();
-                    if (/^https?:\/\/|www\./i.test(sn)) return;
-                    if (!/\d/.test(sn)) return;
-                    if (sn.length < 4) return;
-
-                    if (sn) {
-                        if (!scannedCodes.includes(sn)) {
-                            scannedCodes.unshift(sn); 
-                            addedAny = true;
-                        } else {
-                            hasDuplicates = true;
-                        }
-                    }
-                });
-
-                let now = Date.now();
-
-                if (addedAny) {
-                    playSound('success');
-                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('success');
-                    updateUI(); 
-                } 
-                else if (hasDuplicates && (now - lastErrorTime > 2000)) {
-                    lastErrorTime = now;
-                    playSound('error');
-                    if (tg.HapticFeedback) tg.HapticFeedback.notificationOccurred('error');
-                    
-                    let readerWrap = document.getElementById('reader-wrapper');
-                    readerWrap.classList.add('error-flash');
-                    setTimeout(() => {
-                        readerWrap.classList.remove('error-flash');
-                    }, 500);
-                }
-            },
-            (errorMessage) => {}
-        ).catch((err) => {
-            document.getElementById('codes-list').innerHTML = "<p style='color: #ff3b30;'>Помилка камери: " + err + "</p>";
-        });
-
-        function sendData() {
-            if (scannedCodes.length > 0) {
-                tg.sendData(scannedCodes.join('|'));
-                tg.close();
-            }
         }
-    </script>
+        closeManual();
+    }
+    document.getElementById('manual-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') addManual();
+    });
+
+    /* ── Відправка ───────────────────────────────── */
+    function sendData() {
+        if (scannedCodes.length > 0) {
+            tg.sendData(scannedCodes.join('|'));
+            tg.close();
+        }
+    }
+</script>
 </body>
 </html>
