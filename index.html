@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -314,6 +315,49 @@
         updateUI();
     }
 
+    /* ── Декодування знімка через ZXing ─────────── */
+    function decodeImageFile(file) {
+        return new Promise((resolve, reject) => {
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => {
+                URL.revokeObjectURL(url);
+                const MAX = 1280;
+                let w = img.width, h = img.height;
+                if (w > MAX || h > MAX) {
+                    const s = Math.min(MAX / w, MAX / h);
+                    w = Math.round(w * s); h = Math.round(h * s);
+                }
+                const cvs = document.createElement('canvas');
+                cvs.width = w; cvs.height = h;
+                const c2d = cvs.getContext('2d');
+                c2d.drawImage(img, 0, 0, w, h);
+                const imgData = c2d.getImageData(0, 0, w, h);
+                try {
+                    const hints = new Map([
+                        [ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+                            ZXing.BarcodeFormat.QR_CODE,   ZXing.BarcodeFormat.DATA_MATRIX,
+                            ZXing.BarcodeFormat.EAN_13,    ZXing.BarcodeFormat.EAN_8,
+                            ZXing.BarcodeFormat.CODE_128,  ZXing.BarcodeFormat.CODE_39,
+                            ZXing.BarcodeFormat.CODE_93,   ZXing.BarcodeFormat.UPC_A,
+                            ZXing.BarcodeFormat.UPC_E,     ZXing.BarcodeFormat.ITF,
+                        ]],
+                        [ZXing.DecodeHintType.TRY_HARDER, true],
+                    ]);
+                    const zxr = new ZXing.MultiFormatReader();
+                    zxr.setHints(hints);
+                    const lum = new ZXing.RGBLuminanceSource(imgData.data, w, h);
+                    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+                    const res = zxr.decode(bmp);
+                    const fmt = ZXing.BarcodeFormat[res.getBarcodeFormat()] || 'UNKNOWN';
+                    resolve({ value: res.getText(), format: fmt });
+                } catch(e) { reject(e); }
+            };
+            img.onerror = reject;
+            img.src = url;
+        });
+    }
+
     /* ── Ініціалізація камери (тільки де потрібна) ── */
     async function initCamera() {
         loaderTx.textContent = 'Запит доступу до камери...';
@@ -365,30 +409,62 @@
         });
 
     } else if (typeof tg.showScanQrPopup === 'function') {
-        /* ── iOS Telegram: вбудований сканер (без запиту камери) ── */
+        /* ── iOS Telegram: фото (ZXing) для штрих-кодів + popup для QR ── */
         loader.style.display = 'none';
         const wrapper = document.getElementById('cam-wrapper');
         wrapper.style.background = '#18222d';
         wrapper.innerHTML = `
+            <input type="file" id="cam-file" accept="image/*" capture="environment" style="display:none">
             <div style="display:flex;flex-direction:column;align-items:center;
-                        justify-content:center;height:100%;gap:12px;">
-                <div style="font-size:50px">📷</div>
-                <div style="color:#aaa;font-size:13px">Натисніть для сканування</div>
-                <button id="ios-scan-btn"
-                    style="background:#2ea6ff;color:white;border:none;padding:14px 34px;
-                           border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;">
-                    ▶ Сканувати
-                </button>
-                <div id="ios-dbg" style="color:#666;font-size:10px;max-width:92%;
+                        justify-content:center;height:100%;gap:10px;">
+                <div style="font-size:46px">📷</div>
+                <div style="color:#aaa;font-size:12px">Вибрати режим сканування</div>
+                <div style="display:flex;gap:8px;margin-top:2px;">
+                    <button id="ios-photo-btn"
+                        style="background:#2ea6ff;color:white;border:none;padding:13px 18px;
+                               border-radius:10px;font-size:14px;font-weight:bold;cursor:pointer;">
+                        📸 Штрих / QR
+                    </button>
+                    <button id="ios-qr-btn"
+                        style="background:#243447;color:#2ea6ff;border:2px solid #2ea6ff;
+                               padding:13px 18px;border-radius:10px;font-size:14px;
+                               font-weight:bold;cursor:pointer;">
+                        ⚡ QR швидко
+                    </button>
+                </div>
+                <div id="ios-dbg" style="color:#555;font-size:10px;max-width:92%;
                      overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
                     очікування...
                 </div>
             </div>`;
-        document.getElementById('ios-scan-btn').addEventListener('click', () => {
+
+        /* Фото → ZXing (штрих-коди + QR) */
+        document.getElementById('ios-photo-btn').addEventListener('click', () => {
+            document.getElementById('cam-file').click();
+        });
+        document.getElementById('cam-file').addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const dbg = document.getElementById('ios-dbg');
+            if (dbg) dbg.textContent = 'Обробка...';
+            try {
+                const result = await decodeImageFile(file);
+                if (dbg) dbg.textContent = '→ ' + result.value.substring(0, 50);
+                handleDecoded(result);
+                tg.HapticFeedback?.notificationOccurred('success');
+            } catch(err) {
+                if (dbg) dbg.textContent = 'Код не знайдено — спробуйте ще раз';
+                tg.HapticFeedback?.notificationOccurred('error');
+            }
+            e.target.value = ''; // скинути для наступного сканування
+        });
+
+        /* Telegram popup (лише QR) */
+        document.getElementById('ios-qr-btn').addEventListener('click', () => {
             document.getElementById('ios-dbg').textContent = 'popup відкрито...';
-            tg.showScanQrPopup({ text: 'Наведіть на QR-код або штрих-код' }, (result) => {
+            tg.showScanQrPopup({ text: 'Наведіть на QR-код' }, (result) => {
                 const dbg = document.getElementById('ios-dbg');
-                if (dbg) dbg.textContent = result ? ('→ ' + result.substring(0, 50)) : 'callback: null';
+                if (dbg) dbg.textContent = result ? ('→ ' + result.substring(0, 50)) : 'null';
                 if (result) handleDecoded({ value: result, format: 'QR_CODE' });
                 return false;
             });
