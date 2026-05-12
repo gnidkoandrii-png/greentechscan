@@ -201,7 +201,8 @@
 
 <script>
 (async () => {
-    const tg = window.Telegram.WebApp;
+    const tg = window.Telegram?.WebApp;
+    if (!tg) { document.getElementById('loader-text').textContent = 'Відкрийте в Telegram'; return; }
     tg.expand();
 
     const video    = document.getElementById('video');
@@ -219,39 +220,27 @@
     const COOLDOWN   = 1500;
     let torchOn      = false;
     let videoTrack   = null;
-    let frameMode    = 'qr'; // 'qr' | 'barcode'
-    let autoMode     = true; // автоперемикання рамки за типом коду
+    let frameMode    = 'qr';
+    let autoMode     = true;
 
-    // Формати що є 2D (QR, DataMatrix)
-    const IS_2D = new Set([
-        'qr_code', 'data_matrix', 'aztec',
-        'ZBAR_QRCODE', 'ZBAR_SQCODE',
-    ]);
+    const IS_2D = new Set(['qr_code','data_matrix','aztec','ZBAR_QRCODE','ZBAR_SQCODE','QR_CODE']);
 
     /* ── Рамка ────────────────────────────────── */
     function setFrameMode(mode, auto = false) {
-        if (auto && !autoMode) return; // ручний режим — не перевизначати автоматично
+        if (auto && !autoMode) return;
         frameMode = mode;
         frame.dataset.mode = mode;
-        if (mode === 'qr') {
-            modeHint.textContent = 'QR-код';
-            modeBtn.textContent  = '⬛';
-        } else {
-            modeHint.textContent = 'Штрих-код';
-            modeBtn.textContent  = '▬';
-        }
+        modeHint.textContent = mode === 'qr' ? 'QR-код' : 'Штрих-код';
+        modeBtn.textContent  = mode === 'qr' ? '⬛' : '▬';
         modeBtn.classList.toggle('active', !autoMode);
     }
-
     window.toggleMode = () => {
-        autoMode = false; // після ручного натискання — вимкнути авто
+        autoMode = false;
         setFrameMode(frameMode === 'qr' ? 'barcode' : 'qr');
         tg.HapticFeedback?.impactOccurred('light');
-        // Через 10 секунд повернути авто
         clearTimeout(window._autoModeTimer);
         window._autoModeTimer = setTimeout(() => { autoMode = true; }, 10000);
     };
-
     function flashFrame(type) {
         frame.classList.remove('hit', 'dup');
         void frame.offsetWidth;
@@ -259,11 +248,13 @@
         setTimeout(() => frame.classList.remove(type), type === 'hit' ? COOLDOWN : 500);
     }
 
-    /* ── Звук ─────────────────────────────────── */
-    const AudioCtx = window.AudioContext || window.webkitAudioContext;
-    const actx = new AudioCtx();
+    /* ── Звук (lazy) ──────────────────────────── */
+    let actx = null;
     function beep(ok) {
-        if (actx.state === 'suspended') actx.resume();
+        try {
+            if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+            if (actx.state === 'suspended') actx.resume();
+        } catch(e) { return; }
         const o = actx.createOscillator(), g = actx.createGain();
         o.connect(g); g.connect(actx.destination);
         if (ok) {
@@ -307,22 +298,16 @@
         if (!text || text.length < 4) return;
         if (/^https?:\/\/|www\./i.test(text)) return;
         if (!/\d/.test(text)) return;
-
-        // Адаптуємо рамку за типом
         const is2D = IS_2D.has(format) || (typeof format === 'string' && format.toLowerCase().includes('qr'));
-        setFrameMode(is2D ? 'qr' : 'barcode', /*auto=*/true);
-
+        setFrameMode(is2D ? 'qr' : 'barcode', true);
         if (scannedCodes.includes(text)) {
             if (now - lastErrTime > 2000) {
-                lastErrTime = now;
-                beep(false);
-                tg.HapticFeedback?.notificationOccurred('error');
-                flashFrame('dup');
+                lastErrTime = now; beep(false);
+                tg.HapticFeedback?.notificationOccurred('error'); flashFrame('dup');
             }
             return;
         }
         if (now - lastScanTime < COOLDOWN) return;
-
         lastScanTime = now;
         scannedCodes.unshift(text);
         beep(true);
@@ -331,103 +316,113 @@
         updateUI();
     }
 
-    /* ── Камера ───────────────────────────────── */
-    loaderTx.textContent = 'Запит доступу до камери...';
-    let stream;
-    try {
-        stream = await navigator.mediaDevices.getUserMedia({
+    /* ── Ініціалізація камери (тільки де потрібна) ── */
+    async function initCamera() {
+        loaderTx.textContent = 'Запит доступу до камери...';
+        const stream = await navigator.mediaDevices.getUserMedia({
             video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
         });
-    } catch(e) {
-        loaderTx.textContent = 'Немає доступу до камери: ' + e.message;
-        return;
-    }
-    video.srcObject = stream;
-    await new Promise(r => video.onloadedmetadata = r);
-    video.play();
-
-    videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack.getCapabilities?.()?.torch) {
-        document.getElementById('torch-btn').classList.remove('hidden');
+        video.srcObject = stream;
+        await new Promise(r => video.onloadedmetadata = r);
+        video.play();
+        videoTrack = stream.getVideoTracks()[0];
+        if (videoTrack.getCapabilities?.()?.torch) {
+            document.getElementById('torch-btn').classList.remove('hidden');
+        }
+        loader.style.display = 'none';
+        frame.style.display  = 'block';
     }
 
-    loader.style.display = 'none';
-    frame.style.display  = 'block';
+    /* ── Цикл сканування ─────────────────────── */
+    function startScanLoop(decodeFn) {
+        let busy = false;
+        (async function loop() {
+            while (true) {
+                if (!busy && video.readyState >= 2) {
+                    busy = true;
+                    try { const r = await decodeFn(); if (r) handleDecoded(r); } catch(e) {}
+                    busy = false;
+                }
+                await new Promise(r => requestAnimationFrame(r));
+            }
+        })();
+    }
 
-    /* ── Декодер ──────────────────────────────── */
-    // Повертає { value: string, format: string } | null
-    let decode;
+    /* ════════════════════════════════════════════
+       Вибір декодера залежно від платформи
+       ════════════════════════════════════════════ */
 
     if ('BarcodeDetector' in window) {
-        const formats = ['qr_code','ean_13','ean_8','code_128','code_39',
-                         'code_93','data_matrix','upc_a','upc_e','itf','aztec'];
+        /* ── Android: Native BarcodeDetector ── */
+        try { await initCamera(); } catch(e) { loaderTx.textContent = 'Камера: ' + e.message; return; }
+        document.getElementById('status-label').textContent = '⚡ Native decoder';
+        const formats = ['qr_code','ean_13','ean_8','code_128','code_39','code_93','data_matrix','upc_a','upc_e','itf','aztec'];
         let supported = [];
         try { supported = await BarcodeDetector.getSupportedFormats(); } catch(e) {}
         const use = formats.filter(f => supported.includes(f));
         const bd  = new BarcodeDetector({ formats: use.length ? use : ['qr_code','ean_13','code_128'] });
-        document.getElementById('status-label').textContent = '⚡ Native decoder';
-
-        decode = async () => {
+        startScanLoop(async () => {
             const res = await bd.detect(video);
-            if (!res.length) return null;
-            return { value: res[0].rawValue, format: res[0].format };
-        };
+            return res.length ? { value: res[0].rawValue, format: res[0].format } : null;
+        });
+
+    } else if (typeof tg.showScanQrPopup === 'function') {
+        /* ── iOS Telegram: вбудований сканер (без запиту камери) ── */
+        loader.style.display = 'none';
+        const wrapper = document.getElementById('cam-wrapper');
+        wrapper.style.background = '#18222d';
+        wrapper.innerHTML = `
+            <div style="display:flex;flex-direction:column;align-items:center;
+                        justify-content:center;height:100%;gap:12px;">
+                <div style="font-size:50px">📷</div>
+                <div style="color:#aaa;font-size:13px">Натисніть для сканування</div>
+                <button id="ios-scan-btn"
+                    style="background:#2ea6ff;color:white;border:none;padding:14px 34px;
+                           border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;">
+                    ▶ Сканувати
+                </button>
+                <div style="color:#3a4a5a;font-size:11px">Telegram Scanner · iOS</div>
+            </div>`;
+        document.getElementById('ios-scan-btn').addEventListener('click', () => {
+            tg.showScanQrPopup({ text: 'Наведіть на QR-код або штрих-код' }, (result) => {
+                if (result) handleDecoded({ value: result, format: 'QR_CODE' });
+                return false; // залишати popup відкритим
+            });
+            tg.HapticFeedback?.impactOccurred('light');
+        });
 
     } else {
+        /* ── Desktop / інше: ZBar WASM ── */
+        try { await initCamera(); } catch(e) { loaderTx.textContent = 'Камера: ' + e.message; return; }
         loaderTx.textContent = 'Завантаження ZBar...';
         loader.style.display = 'flex';
         frame.style.display  = 'none';
-
         let scanImageData;
         try {
             const mod = await import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.9.15/dist/main.mjs');
             scanImageData = mod.scanImageData;
-        } catch(e) {
-            loaderTx.textContent = 'Помилка ZBar: ' + e.message; return;
-        }
-
+        } catch(e) { loaderTx.textContent = 'Помилка ZBar: ' + e.message; return; }
         loader.style.display = 'none';
         frame.style.display  = 'block';
         document.getElementById('status-label').textContent = '🔍 ZBar WASM';
-
-        decode = async () => {
+        startScanLoop(async () => {
             if (!video.videoWidth) return null;
-            // Кроп під поточну рамку — сканується лише область рамки
-            const fw = frame.offsetWidth,  fh = frame.offsetHeight;
+            const fw = frame.offsetWidth, fh = frame.offsetHeight;
             const vw = video.offsetWidth,  vh = video.offsetHeight;
-            const scaleX = video.videoWidth  / vw;
-            const scaleY = video.videoHeight / vh;
-            const fx = (vw / 2 - fw / 2) * scaleX;
-            const fy = (vh / 2 - fh / 2) * scaleY;
-            const fw2 = fw * scaleX, fh2 = fh * scaleY;
-
+            const scaleX = video.videoWidth / vw, scaleY = video.videoHeight / vh;
+            const fx = (vw/2 - fw/2)*scaleX, fy = (vh/2 - fh/2)*scaleY;
+            const fw2 = fw*scaleX, fh2 = fh*scaleY;
             canvas.width = fw2; canvas.height = fh2;
             ctx.drawImage(video, fx, fy, fw2, fh2, 0, 0, fw2, fh2);
-            const imgData = ctx.getImageData(0, 0, fw2, fh2);
-            const symbols = await scanImageData(imgData);
-            if (!symbols.length) return null;
-            return { value: symbols[0].decode(), format: symbols[0].typeName };
-        };
+            const imgData  = ctx.getImageData(0, 0, fw2, fh2);
+            const symbols  = await scanImageData(imgData);
+            return symbols.length ? { value: symbols[0].decode(), format: symbols[0].typeName } : null;
+        });
     }
-
-    /* ── Цикл сканування ──────────────────────── */
-    let busy = false;
-    (async function scanLoop() {
-        while (true) {
-            if (!busy && video.readyState >= 2) {
-                busy = true;
-                try {
-                    const result = await decode();
-                    if (result) handleDecoded(result);
-                } catch(e) {}
-                busy = false;
-            }
-            await new Promise(r => requestAnimationFrame(r));
-        }
-    })();
 
     /* ── Ліхтарик ─────────────────────────────── */
     window.toggleTorch = async () => {
+        if (!videoTrack) return;
         torchOn = !torchOn;
         try {
             await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
