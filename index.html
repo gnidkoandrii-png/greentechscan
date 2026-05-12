@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -17,58 +16,34 @@
         #cam-wrapper {
             width: 100%; height: 45vh; flex-shrink: 0; background: #000;
             border-bottom: 3px solid #2ea6ff; overflow: hidden;
-            position: relative;
+            position: relative; transition: border 0.2s, box-shadow 0.2s;
         }
-        #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        #video {
+            width: 100%; height: 100%; object-fit: cover;
+            display: block;
+        }
 
-        /* ── Адаптивна рамка ──────────────────────────── */
+        /* Рамка сканування */
         #scan-frame {
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
+            width: 200px; height: 200px;
+            border: 2px solid rgba(46,166,255,0.7);
+            border-radius: 12px;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.35);
             pointer-events: none;
-            /* Темний оверлей навколо рамки */
-            box-shadow: 0 0 0 9999px rgba(0,0,0,0.38);
-            /* Плавна зміна розміру та форми */
-            transition: width 0.35s ease, height 0.35s ease, border-radius 0.35s ease;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        #scan-frame.hit {
+            border-color: #4ecdc4;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.35), inset 0 0 20px rgba(78,205,196,0.4);
+        }
+        #scan-frame.dup {
+            border-color: #ff3b30;
+            box-shadow: 0 0 0 9999px rgba(0,0,0,0.35), inset 0 0 20px rgba(255,59,48,0.5);
         }
 
-        /* Розміри залежно від режиму */
-        #scan-frame[data-mode="qr"]      { width: 200px; height: 200px; border-radius: 14px; }
-        #scan-frame[data-mode="barcode"] { width: 310px; height: 80px;  border-radius: 6px;  }
-
-        /* Кутові маркери */
-        .corner {
-            position: absolute;
-            width: 24px; height: 24px;
-            border-style: solid;
-            transition: width 0.2s, height 0.2s, border-color 0.15s;
-        }
-        .corner.tl { top: -1px;    left: -1px;    border-width: 3px 0 0 3px; border-radius: 4px 0 0 4px; }
-        .corner.tr { top: -1px;    right: -1px;   border-width: 3px 3px 0 0; border-radius: 0 4px 4px 0; }
-        .corner.bl { bottom: -1px; left: -1px;    border-width: 0 0 3px 3px; border-radius: 4px 0 0 4px; }
-        .corner.br { bottom: -1px; right: -1px;   border-width: 0 3px 3px 0; border-radius: 0 4px 4px 0; }
-
-        /* Колір кутів за станом */
-        #scan-frame .corner           { border-color: rgba(46,166,255,0.85); }
-        #scan-frame.hit .corner       { border-color: #4ecdc4; }
-        #scan-frame.dup .corner       { border-color: #ff3b30; }
-
-        /* Внутрішній flash */
-        #scan-frame::after {
-            content: ''; position: absolute; inset: 0; border-radius: inherit;
-            opacity: 0; transition: opacity 0.15s;
-        }
-        #scan-frame.hit::after { background: rgba(78,205,196,0.18); opacity: 1; }
-        #scan-frame.dup::after { background: rgba(255,59,48,0.22);  opacity: 1; }
-
-        /* Підпис режиму всередині рамки */
-        #mode-hint {
-            position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
-            font-size: 10px; color: rgba(255,255,255,0.45); white-space: nowrap;
-            pointer-events: none; transition: opacity 0.2s;
-        }
-
-        /* Статус знизу камери */
+        /* Статус зверху */
         #status-label {
             position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
             background: rgba(0,0,0,0.55); color: #aaa;
@@ -84,17 +59,18 @@
         .cam-btn {
             width: 44px; height: 44px; border-radius: 50%;
             background: rgba(0,0,0,0.55); border: 2px solid rgba(255,255,255,0.25);
-            color: white; font-size: 19px; cursor: pointer;
+            color: white; font-size: 20px; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
             transition: background 0.2s, border-color 0.2s;
-            user-select: none;
         }
-        .cam-btn.active { background: rgba(46,166,255,0.7); border-color: #2ea6ff; }
         .cam-btn.torch-on { background: rgba(255,220,0,0.75); border-color: #ffd700; }
-        .cam-btn.hidden   { display: none; }
+        .cam-btn.hidden    { display: none; }
 
-        /* ── Нижня панель ─────────────────────────────── */
-        .stats { flex: 1; padding: 12px 12px 10px; display: flex; flex-direction: column; min-height: 0; }
+        /* Нижня панель */
+        .stats {
+            flex: 1; padding: 12px 12px 10px;
+            display: flex; flex-direction: column; min-height: 0;
+        }
         .top-bar {
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 8px; flex-shrink: 0;
@@ -104,24 +80,37 @@
             background: #2a3a4a; border: none; color: #ccc;
             border-radius: 8px; padding: 7px 13px; font-size: 18px; cursor: pointer;
         }
+        .icon-btn:active { background: #1a2a3a; }
+
         .codes-scroll { flex: 1; overflow-y: auto; margin-bottom: 8px; padding-right: 4px; }
+
         .code-row {
             display: flex; justify-content: space-between; align-items: center;
             background: #243447; padding: 10px 15px; margin-bottom: 8px;
             border-radius: 8px; border-left: 3px solid #4caf50;
             font-family: monospace; font-size: 15px; word-break: break-all; text-align: left;
         }
-        .del-btn { color: #ff3b30; font-size: 22px; font-weight: bold; cursor: pointer; padding-left: 15px; flex-shrink: 0; }
+        .del-btn {
+            color: #ff3b30; font-size: 22px; font-weight: bold;
+            cursor: pointer; padding-left: 15px; flex-shrink: 0;
+        }
+
         .send-btn {
             background: #2ea6ff; color: white; border: none; padding: 16px;
             font-size: 18px; border-radius: 10px; width: 100%; display: none;
             font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); flex-shrink: 0;
         }
 
-        /* ── Модальний ввід ───────────────────────────── */
-        #manual-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: flex-end; z-index: 100; }
+        /* Модальний ввід */
+        #manual-modal {
+            position: fixed; inset: 0; background: rgba(0,0,0,0.65);
+            display: none; align-items: flex-end; z-index: 100;
+        }
         #manual-modal.open { display: flex; }
-        .modal-box { background: #243447; width: 100%; padding: 20px; border-radius: 16px 16px 0 0; border-top: 2px solid #2ea6ff; }
+        .modal-box {
+            background: #243447; width: 100%; padding: 20px;
+            border-radius: 16px 16px 0 0; border-top: 2px solid #2ea6ff;
+        }
         .modal-title { font-size: 15px; font-weight: bold; margin-bottom: 12px; color: #2ea6ff; }
         #manual-input {
             width: 100%; padding: 13px; font-size: 16px; font-family: monospace;
@@ -130,11 +119,13 @@
         }
         #manual-input:focus { border-color: #2ea6ff; }
         .modal-btns { display: flex; gap: 10px; }
-        .modal-btns button { flex: 1; padding: 14px; border-radius: 8px; border: none; font-size: 16px; font-weight: bold; cursor: pointer; }
+        .modal-btns button {
+            flex: 1; padding: 14px; border-radius: 8px; border: none;
+            font-size: 16px; font-weight: bold; cursor: pointer;
+        }
         .btn-cancel { background: #3a4a5a; color: #aaa; }
         .btn-add    { background: #2ea6ff; color: white; }
 
-        /* ── Лоадер ───────────────────────────────────── */
         #loader {
             position: absolute; inset: 0; background: #000;
             display: flex; align-items: center; justify-content: center;
@@ -159,21 +150,12 @@
         <span id="loader-text">Ініціалізація...</span>
     </div>
 
-    <!-- Рамка з кутовими маркерами -->
-    <div id="scan-frame" data-mode="qr" style="display:none;">
-        <div class="corner tl"></div>
-        <div class="corner tr"></div>
-        <div class="corner bl"></div>
-        <div class="corner br"></div>
-        <span id="mode-hint">QR-код</span>
-    </div>
-
+    <div id="scan-frame" style="display:none;"></div>
     <div id="status-label">Наведіть на код</div>
 
     <div id="cam-controls">
-        <button class="cam-btn hidden" id="torch-btn"  onclick="toggleTorch()" title="Ліхтарик">🔦</button>
-        <button class="cam-btn"        id="mode-btn"   onclick="toggleMode()"  title="QR / Штрих-код">⬛</button>
-        <button class="cam-btn"        id="manual-btn" onclick="openManual()"  title="Ввести вручну">⌨️</button>
+        <button class="cam-btn hidden" id="torch-btn" onclick="toggleTorch()" title="Ліхтарик">🔦</button>
+        <button class="cam-btn" onclick="openManual()" title="Ввести вручну">⌨️</button>
     </div>
 </div>
 
@@ -211,54 +193,14 @@
     const loader   = document.getElementById('loader');
     const loaderTx = document.getElementById('loader-text');
     const frame    = document.getElementById('scan-frame');
-    const modeHint = document.getElementById('mode-hint');
-    const modeBtn  = document.getElementById('mode-btn');
 
-    let scannedCodes = [];
-    let lastScanTime = 0;
-    let lastErrTime  = 0;
-    const COOLDOWN   = 1500;
-    let torchOn      = false;
-    let videoTrack   = null;
-    let frameMode    = 'qr'; // 'qr' | 'barcode'
-    let autoMode     = true; // автоперемикання рамки за типом коду
-
-    // Формати що є 2D (QR, DataMatrix)
-    const IS_2D = new Set([
-        'qr_code', 'data_matrix', 'aztec',
-        'ZBAR_QRCODE', 'ZBAR_SQCODE',
-    ]);
-
-    /* ── Рамка ────────────────────────────────── */
-    function setFrameMode(mode, auto = false) {
-        if (auto && !autoMode) return; // ручний режим — не перевизначати автоматично
-        frameMode = mode;
-        frame.dataset.mode = mode;
-        if (mode === 'qr') {
-            modeHint.textContent = 'QR-код';
-            modeBtn.textContent  = '⬛';
-        } else {
-            modeHint.textContent = 'Штрих-код';
-            modeBtn.textContent  = '▬';
-        }
-        modeBtn.classList.toggle('active', !autoMode);
-    }
-
-    window.toggleMode = () => {
-        autoMode = false; // після ручного натискання — вимкнути авто
-        setFrameMode(frameMode === 'qr' ? 'barcode' : 'qr');
-        tg.HapticFeedback?.impactOccurred('light');
-        // Через 10 секунд повернути авто
-        clearTimeout(window._autoModeTimer);
-        window._autoModeTimer = setTimeout(() => { autoMode = true; }, 10000);
-    };
-
-    function flashFrame(type) {
-        frame.classList.remove('hit', 'dup');
-        void frame.offsetWidth;
-        frame.classList.add(type);
-        setTimeout(() => frame.classList.remove(type), type === 'hit' ? COOLDOWN : 500);
-    }
+    let scannedCodes  = [];
+    let lastScanTime  = 0;
+    let lastErrTime   = 0;
+    const COOLDOWN    = 1500;
+    let torchOn       = false;
+    let videoTrack    = null;
+    let scanActive    = true;
 
     /* ── Звук ─────────────────────────────────── */
     const AudioCtx = window.AudioContext || window.webkitAudioContext;
@@ -300,18 +242,20 @@
         }
     }
     window.removeCode = i => { scannedCodes.splice(i, 1); tg.HapticFeedback?.impactOccurred('light'); updateUI(); };
-    window.clearAll   = () => { scannedCodes = []; tg.HapticFeedback?.impactOccurred('medium'); updateUI(); };
+    function clearAll() { scannedCodes = []; tg.HapticFeedback?.impactOccurred('medium'); updateUI(); }
 
-    /* ── Обробка декодованого ─────────────────── */
-    function handleDecoded({ value: text, format }) {
+    function flashFrame(type) {
+        frame.classList.remove('hit', 'dup');
+        void frame.offsetWidth;
+        frame.classList.add(type);
+        setTimeout(() => frame.classList.remove(type), type === 'hit' ? COOLDOWN : 500);
+    }
+
+    function handleCode(text) {
         const now = Date.now();
         if (!text || text.length < 4) return;
         if (/^https?:\/\/|www\./i.test(text)) return;
         if (!/\d/.test(text)) return;
-
-        // Адаптуємо рамку за типом
-        const is2D = IS_2D.has(format) || (typeof format === 'string' && format.toLowerCase().includes('qr'));
-        setFrameMode(is2D ? 'qr' : 'barcode', /*auto=*/true);
 
         if (scannedCodes.includes(text)) {
             if (now - lastErrTime > 2000) {
@@ -322,6 +266,7 @@
             }
             return;
         }
+
         if (now - lastScanTime < COOLDOWN) return;
 
         lastScanTime = now;
@@ -332,7 +277,7 @@
         updateUI();
     }
 
-    /* ── Камера ───────────────────────────────── */
+    /* ── Ініціалізація камери ─────────────────── */
     loaderTx.textContent = 'Запит доступу до камери...';
     let stream;
     try {
@@ -343,97 +288,87 @@
         loaderTx.textContent = 'Немає доступу до камери: ' + e.message;
         return;
     }
+
     video.srcObject = stream;
     await new Promise(r => video.onloadedmetadata = r);
     video.play();
 
+    // Torch
     videoTrack = stream.getVideoTracks()[0];
-    if (videoTrack.getCapabilities?.()?.torch) {
+    const caps = videoTrack.getCapabilities?.() || {};
+    if (caps.torch) {
         document.getElementById('torch-btn').classList.remove('hidden');
     }
 
     loader.style.display = 'none';
     frame.style.display  = 'block';
 
-    /* ── Декодер ──────────────────────────────── */
-    // Повертає { value: string, format: string } | null
-    let decode;
+    /* ── Вибір декодера ───────────────────────── */
+    let decode; // async () => string | null
 
+    // 1. Нативний BarcodeDetector (Android Chrome / Chromium) — найшвидший
     if ('BarcodeDetector' in window) {
-        const formats = ['qr_code','ean_13','ean_8','code_128','code_39',
-                         'code_93','data_matrix','upc_a','upc_e','itf','aztec'];
+        const formats = ['qr_code', 'ean_13', 'ean_8', 'code_128', 'code_39',
+                         'code_93', 'data_matrix', 'upc_a', 'upc_e', 'itf'];
         let supported = [];
         try { supported = await BarcodeDetector.getSupportedFormats(); } catch(e) {}
         const use = formats.filter(f => supported.includes(f));
-        const bd  = new BarcodeDetector({ formats: use.length ? use : ['qr_code','ean_13','code_128'] });
+        const bd  = new BarcodeDetector({ formats: use.length ? use : ['qr_code', 'ean_13', 'code_128'] });
         document.getElementById('status-label').textContent = '⚡ Native decoder';
-
         decode = async () => {
             const res = await bd.detect(video);
-            if (!res.length) return null;
-            return { value: res[0].rawValue, format: res[0].format };
+            return res.length ? res[0].rawValue : null;
         };
 
+    // 2. ZBar WASM — iOS / Firefox / інші
     } else {
-        // ZXing завантажено статично в <head>
-        document.getElementById('status-label').textContent = '🔍 ZXing JS';
+        loaderTx.textContent = 'Завантаження ZBar...';
+        loader.style.display = 'flex';
+        frame.style.display  = 'none';
 
-        const hints = new Map();
-        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-            ZXing.BarcodeFormat.QR_CODE,   ZXing.BarcodeFormat.DATA_MATRIX,
-            ZXing.BarcodeFormat.EAN_13,    ZXing.BarcodeFormat.EAN_8,
-            ZXing.BarcodeFormat.CODE_128,  ZXing.BarcodeFormat.CODE_39,
-            ZXing.BarcodeFormat.CODE_93,   ZXing.BarcodeFormat.UPC_A,
-            ZXing.BarcodeFormat.UPC_E,     ZXing.BarcodeFormat.ITF,
-        ]);
-        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-        const zxReader = new ZXing.MultiFormatReader();
-        zxReader.setHints(hints);
+        let scanImageData;
+        try {
+            const mod = await import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.9.15/dist/main.mjs');
+            scanImageData = mod.scanImageData;
+        } catch(e) {
+            loaderTx.textContent = 'Помилка завантаження ZBar: ' + e.message;
+            return;
+        }
 
-        decode = () => {  // синхронний
-            if (!video.videoWidth) return null;
-            const fw = frame.offsetWidth,  fh = frame.offsetHeight;
-            const vw = video.offsetWidth,  vh = video.offsetHeight;
-            const scaleX = video.videoWidth  / vw;
-            const scaleY = video.videoHeight / vh;
-            const fx  = (vw / 2 - fw / 2) * scaleX;
-            const fy  = (vh / 2 - fh / 2) * scaleY;
-            const fw2 = fw * scaleX, fh2 = fh * scaleY;
+        loader.style.display = 'none';
+        frame.style.display  = 'block';
+        document.getElementById('status-label').textContent = '🔍 ZBar WASM';
 
-            canvas.width = fw2; canvas.height = fh2;
-            ctx.drawImage(video, fx, fy, fw2, fh2, 0, 0, fw2, fh2);
-            const imgData = ctx.getImageData(0, 0, fw2, fh2);
-
-            try {
-                const lum    = new ZXing.RGBLuminanceSource(imgData.data, fw2, fh2);
-                const bmp    = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-                const result = zxReader.decode(bmp);
-                const fmt    = ZXing.BarcodeFormat[result.getBarcodeFormat()] || 'UNKNOWN';
-                return { value: result.getText(), format: fmt };
-            } catch(e) {
-                return null; // NotFoundException — норма, код не знайдено у кадрі
-            }
+        decode = async () => {
+            if (video.videoWidth === 0) return null;
+            canvas.width  = video.videoWidth;
+            canvas.height = video.videoHeight;
+            ctx.drawImage(video, 0, 0);
+            const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const symbols = await scanImageData(imgData);
+            return symbols.length ? symbols[0].decode() : null;
         };
     }
 
     /* ── Цикл сканування ──────────────────────── */
-    let busy = false;
-    (async function scanLoop() {
-        while (true) {
-            if (!busy && video.readyState >= 2) {
-                busy = true;
-                try {
-                    const result = await decode();
-                    if (result) handleDecoded(result);
-                } catch(e) {}
-                busy = false;
-            }
-            await new Promise(r => requestAnimationFrame(r));
+    let processing = false;
+    async function scanLoop() {
+        if (!scanActive) return;
+        if (!processing && video.readyState >= 2) {
+            processing = true;
+            try {
+                const result = await decode();
+                if (result) handleCode(result.trim());
+            } catch(e) {}
+            processing = false;
         }
-    })();
+        requestAnimationFrame(scanLoop);
+    }
+    scanLoop();
 
     /* ── Ліхтарик ─────────────────────────────── */
     window.toggleTorch = async () => {
+        if (!videoTrack) return;
         torchOn = !torchOn;
         try {
             await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
@@ -443,13 +378,32 @@
     };
 
     /* ── Ручний ввід ──────────────────────────── */
-    window.openManual  = () => { document.getElementById('manual-modal').classList.add('open'); setTimeout(() => document.getElementById('manual-input').focus(), 100); };
-    window.closeManual = () => { document.getElementById('manual-modal').classList.remove('open'); document.getElementById('manual-input').value = ''; };
-    window.addManual   = () => { const v = document.getElementById('manual-input').value.trim(); if (v) handleDecoded({ value: v, format: 'manual' }); closeManual(); };
-    document.getElementById('manual-input').addEventListener('keydown', e => { if (e.key === 'Enter') addManual(); });
+    window.openManual = () => {
+        document.getElementById('manual-modal').classList.add('open');
+        setTimeout(() => document.getElementById('manual-input').focus(), 100);
+    };
+    window.closeManual = () => {
+        document.getElementById('manual-modal').classList.remove('open');
+        document.getElementById('manual-input').value = '';
+    };
+    window.addManual = () => {
+        const val = document.getElementById('manual-input').value.trim();
+        if (val) handleCode(val);
+        closeManual();
+    };
+    document.getElementById('manual-input').addEventListener('keydown', e => {
+        if (e.key === 'Enter') addManual();
+    });
 
     /* ── Відправка ────────────────────────────── */
-    window.sendData = () => { if (scannedCodes.length) { tg.sendData(scannedCodes.join('|')); tg.close(); } };
+    window.sendData = () => {
+        if (scannedCodes.length > 0) {
+            tg.sendData(scannedCodes.join('|'));
+            tg.close();
+        }
+    };
+
+    window.clearAll = clearAll;
 
 })();
 </script>
