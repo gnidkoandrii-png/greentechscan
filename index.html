@@ -358,6 +358,21 @@
         });
     }
 
+    /* ── Кроп відео до активної рамки ──────────── */
+    function captureFrameRegion() {
+        if (!video.videoWidth || !frame.offsetWidth) return null;
+        const fw = frame.offsetWidth,  fh = frame.offsetHeight;
+        const vw = video.offsetWidth,  vh = video.offsetHeight;
+        const scaleX = video.videoWidth  / vw;
+        const scaleY = video.videoHeight / vh;
+        const fx  = (vw / 2 - fw / 2) * scaleX;
+        const fy  = (vh / 2 - fh / 2) * scaleY;
+        const fw2 = Math.round(fw * scaleX), fh2 = Math.round(fh * scaleY);
+        canvas.width = fw2; canvas.height = fh2;
+        ctx.drawImage(video, fx, fy, fw2, fh2, 0, 0, fw2, fh2);
+        return canvas;
+    }
+
     /* ── Ініціалізація камери (тільки де потрібна) ── */
     async function initCamera() {
         loaderTx.textContent = 'Запит доступу до камери...';
@@ -404,42 +419,35 @@
         const use = formats.filter(f => supported.includes(f));
         const bd  = new BarcodeDetector({ formats: use.length ? use : ['qr_code','ean_13','code_128'] });
         startScanLoop(async () => {
-            const res = await bd.detect(video);
+            const c = captureFrameRegion();
+            if (!c) return null;
+            const res = await bd.detect(c);
             return res.length ? { value: res[0].rawValue, format: res[0].format } : null;
         });
 
     } else if (typeof tg.showScanQrPopup === 'function') {
-        /* ── iOS Telegram: фото (ZXing) для штрих-кодів + popup для QR ── */
+        /* ── iOS Telegram: фото → ZXing (один код зблизька) ── */
         loader.style.display = 'none';
         const wrapper = document.getElementById('cam-wrapper');
         wrapper.style.background = '#18222d';
         wrapper.innerHTML = `
             <input type="file" id="cam-file" accept="image/*" capture="environment" style="display:none">
             <div style="display:flex;flex-direction:column;align-items:center;
-                        justify-content:center;height:100%;gap:10px;">
-                <div style="font-size:46px">📷</div>
-                <div style="color:#aaa;font-size:12px">Вибрати режим сканування</div>
-                <div style="display:flex;gap:8px;margin-top:2px;">
-                    <button id="ios-photo-btn"
-                        style="background:#2ea6ff;color:white;border:none;padding:13px 18px;
-                               border-radius:10px;font-size:14px;font-weight:bold;cursor:pointer;">
-                        📸 Штрих / QR
-                    </button>
-                    <button id="ios-qr-btn"
-                        style="background:#243447;color:#2ea6ff;border:2px solid #2ea6ff;
-                               padding:13px 18px;border-radius:10px;font-size:14px;
-                               font-weight:bold;cursor:pointer;">
-                        ⚡ QR швидко
-                    </button>
+                        justify-content:center;height:100%;gap:12px;padding:0 16px;">
+                <div style="font-size:50px">📷</div>
+                <div style="color:#aaa;font-size:12px;text-align:center;line-height:1.5">
+                    Сфотографуйте один штрих-код або QR зблизька
                 </div>
+                <button id="ios-scan-btn"
+                    style="background:#2ea6ff;color:white;border:none;padding:14px 36px;
+                           border-radius:12px;font-size:16px;font-weight:bold;cursor:pointer;">
+                    📸 Сканувати
+                </button>
                 <div id="ios-dbg" style="color:#555;font-size:10px;max-width:92%;
-                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                    очікування...
-                </div>
+                     overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">очікування...</div>
             </div>`;
 
-        /* Фото → ZXing (штрих-коди + QR) */
-        document.getElementById('ios-photo-btn').addEventListener('click', () => {
+        document.getElementById('ios-scan-btn').addEventListener('click', () => {
             document.getElementById('cam-file').click();
         });
         document.getElementById('cam-file').addEventListener('change', async (e) => {
@@ -453,22 +461,10 @@
                 handleDecoded(result);
                 tg.HapticFeedback?.notificationOccurred('success');
             } catch(err) {
-                if (dbg) dbg.textContent = 'Код не знайдено — спробуйте ще раз';
+                if (dbg) dbg.textContent = 'Код не знайдено — підійдіть ближче';
                 tg.HapticFeedback?.notificationOccurred('error');
             }
-            e.target.value = ''; // скинути для наступного сканування
-        });
-
-        /* Telegram popup (лише QR) */
-        document.getElementById('ios-qr-btn').addEventListener('click', () => {
-            document.getElementById('ios-dbg').textContent = 'popup відкрито...';
-            tg.showScanQrPopup({ text: 'Наведіть на QR-код' }, (result) => {
-                const dbg = document.getElementById('ios-dbg');
-                if (dbg) dbg.textContent = result ? ('→ ' + result.substring(0, 50)) : 'null';
-                if (result) handleDecoded({ value: result, format: 'QR_CODE' });
-                return false;
-            });
-            tg.HapticFeedback?.impactOccurred('light');
+            e.target.value = '';
         });
 
     } else {
@@ -486,16 +482,10 @@
         frame.style.display  = 'block';
         document.getElementById('status-label').textContent = '🔍 ZBar WASM';
         startScanLoop(async () => {
-            if (!video.videoWidth) return null;
-            const fw = frame.offsetWidth, fh = frame.offsetHeight;
-            const vw = video.offsetWidth,  vh = video.offsetHeight;
-            const scaleX = video.videoWidth / vw, scaleY = video.videoHeight / vh;
-            const fx = (vw/2 - fw/2)*scaleX, fy = (vh/2 - fh/2)*scaleY;
-            const fw2 = fw*scaleX, fh2 = fh*scaleY;
-            canvas.width = fw2; canvas.height = fh2;
-            ctx.drawImage(video, fx, fy, fw2, fh2, 0, 0, fw2, fh2);
-            const imgData  = ctx.getImageData(0, 0, fw2, fh2);
-            const symbols  = await scanImageData(imgData);
+            const c = captureFrameRegion();
+            if (!c) return null;
+            const imgData = ctx.getImageData(0, 0, c.width, c.height);
+            const symbols = await scanImageData(imgData);
             return symbols.length ? { value: symbols[0].decode(), format: symbols[0].typeName } : null;
         });
     }
