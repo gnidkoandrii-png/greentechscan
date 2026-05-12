@@ -374,39 +374,58 @@
         };
 
     } else {
-        loaderTx.textContent = 'Завантаження ZBar...';
+        // Завантажуємо ZXing через звичайний <script> — працює на iOS WKWebView
+        loaderTx.textContent = 'Завантаження сканера...';
         loader.style.display = 'flex';
         frame.style.display  = 'none';
 
-        let scanImageData;
-        try {
-            const mod = await import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.9.15/dist/main.mjs');
-            scanImageData = mod.scanImageData;
-        } catch(e) {
-            loaderTx.textContent = 'Помилка ZBar: ' + e.message; return;
-        }
+        await new Promise((resolve, reject) => {
+            const s = document.createElement('script');
+            s.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js';
+            s.onload = resolve;
+            s.onerror = () => reject(new Error('Не вдалося завантажити ZXing'));
+            document.head.appendChild(s);
+        }).catch(e => { loaderTx.textContent = 'Помилка: ' + e.message; throw e; });
 
         loader.style.display = 'none';
         frame.style.display  = 'block';
-        document.getElementById('status-label').textContent = '🔍 ZBar WASM';
+        document.getElementById('status-label').textContent = '🔍 ZXing JS';
 
-        decode = async () => {
+        const hints = new Map();
+        hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+            ZXing.BarcodeFormat.QR_CODE,   ZXing.BarcodeFormat.DATA_MATRIX,
+            ZXing.BarcodeFormat.EAN_13,    ZXing.BarcodeFormat.EAN_8,
+            ZXing.BarcodeFormat.CODE_128,  ZXing.BarcodeFormat.CODE_39,
+            ZXing.BarcodeFormat.CODE_93,   ZXing.BarcodeFormat.UPC_A,
+            ZXing.BarcodeFormat.UPC_E,     ZXing.BarcodeFormat.ITF,
+        ]);
+        hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+        const zxReader = new ZXing.MultiFormatReader();
+        zxReader.setHints(hints);
+
+        decode = () => {  // синхронний
             if (!video.videoWidth) return null;
-            // Кроп під поточну рамку — сканується лише область рамки
             const fw = frame.offsetWidth,  fh = frame.offsetHeight;
             const vw = video.offsetWidth,  vh = video.offsetHeight;
             const scaleX = video.videoWidth  / vw;
             const scaleY = video.videoHeight / vh;
-            const fx = (vw / 2 - fw / 2) * scaleX;
-            const fy = (vh / 2 - fh / 2) * scaleY;
+            const fx  = (vw / 2 - fw / 2) * scaleX;
+            const fy  = (vh / 2 - fh / 2) * scaleY;
             const fw2 = fw * scaleX, fh2 = fh * scaleY;
 
             canvas.width = fw2; canvas.height = fh2;
             ctx.drawImage(video, fx, fy, fw2, fh2, 0, 0, fw2, fh2);
             const imgData = ctx.getImageData(0, 0, fw2, fh2);
-            const symbols = await scanImageData(imgData);
-            if (!symbols.length) return null;
-            return { value: symbols[0].decode(), format: symbols[0].typeName };
+
+            try {
+                const lum    = new ZXing.RGBLuminanceSource(imgData.data, fw2, fh2);
+                const bmp    = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+                const result = zxReader.decode(bmp);
+                const fmt    = ZXing.BarcodeFormat[result.getBarcodeFormat()] || 'UNKNOWN';
+                return { value: result.getText(), format: fmt };
+            } catch(e) {
+                return null; // NotFoundException — норма, код не знайдено у кадрі
+            }
         };
     }
 
