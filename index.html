@@ -6,55 +6,45 @@
     <title>Сканер Greentech</title>
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.19.1/umd/index.min.js"></script>
-    <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
     <style>
-        * { box-sizing: border-box; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             background: #18222d; color: white; text-align: center;
-            margin: 0; padding: 0; font-family: sans-serif;
-            display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+            font-family: sans-serif;
+            display: flex; flex-direction: column; height: 100dvh; overflow: hidden;
         }
 
         #cam-wrapper {
             width: 100%; height: 45vh; flex-shrink: 0; background: #000;
-            border-bottom: 3px solid #2ea6ff; overflow: hidden;
-            position: relative;
+            border-bottom: 3px solid #2ea6ff; overflow: hidden; position: relative;
         }
-        #video { width: 100%; height: 100%; object-fit: cover; display: block; }
+        #video {
+            width: 100%; height: 100%; object-fit: cover; display: block;
+            /* iOS: prevent grey flash on start */
+            -webkit-transform: translateZ(0); transform: translateZ(0);
+        }
+        #scan-canvas { display: none; }
 
-        /* ── Адаптивна рамка ──────────────────────────── */
         #scan-frame {
             position: absolute; top: 50%; left: 50%;
             transform: translate(-50%, -50%);
             pointer-events: none;
-            /* Темний оверлей навколо рамки */
             box-shadow: 0 0 0 9999px rgba(0,0,0,0.38);
-            /* Плавна зміна розміру та форми */
-            transition: width 0.35s ease, height 0.35s ease, border-radius 0.35s ease;
+            transition: width 0.3s ease, height 0.3s ease, border-radius 0.3s ease;
         }
-
-        /* Розміри залежно від режиму */
         #scan-frame[data-mode="qr"]      { width: 200px; height: 200px; border-radius: 14px; }
         #scan-frame[data-mode="barcode"] { width: 310px; height: 80px;  border-radius: 6px;  }
 
-        /* Кутові маркери */
         .corner {
-            position: absolute;
-            width: 24px; height: 24px;
-            border-style: solid;
-            transition: width 0.2s, height 0.2s, border-color 0.15s;
+            position: absolute; width: 24px; height: 24px; border-style: solid;
         }
         .corner.tl { top: -1px;    left: -1px;    border-width: 3px 0 0 3px; border-radius: 4px 0 0 4px; }
         .corner.tr { top: -1px;    right: -1px;   border-width: 3px 3px 0 0; border-radius: 0 4px 4px 0; }
         .corner.bl { bottom: -1px; left: -1px;    border-width: 0 0 3px 3px; border-radius: 4px 0 0 4px; }
         .corner.br { bottom: -1px; right: -1px;   border-width: 0 3px 3px 0; border-radius: 0 4px 4px 0; }
-
-        /* Колір кутів за станом */
-        #scan-frame .corner           { border-color: rgba(46,166,255,0.85); }
-        #scan-frame.hit .corner       { border-color: #4ecdc4; }
-        #scan-frame.dup .corner       { border-color: #ff3b30; }
-
-        /* Внутрішній flash */
+        #scan-frame .corner       { border-color: rgba(46,166,255,0.85); }
+        #scan-frame.hit .corner   { border-color: #4ecdc4; }
+        #scan-frame.dup .corner   { border-color: #ff3b30; }
         #scan-frame::after {
             content: ''; position: absolute; inset: 0; border-radius: inherit;
             opacity: 0; transition: opacity 0.15s;
@@ -62,22 +52,17 @@
         #scan-frame.hit::after { background: rgba(78,205,196,0.18); opacity: 1; }
         #scan-frame.dup::after { background: rgba(255,59,48,0.22);  opacity: 1; }
 
-        /* Підпис режиму всередині рамки */
         #mode-hint {
             position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%);
-            font-size: 10px; color: rgba(255,255,255,0.45); white-space: nowrap;
-            pointer-events: none; transition: opacity 0.2s;
+            font-size: 10px; color: rgba(255,255,255,0.45); white-space: nowrap; pointer-events: none;
         }
-
-        /* Статус знизу камери */
         #status-label {
             position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
             background: rgba(0,0,0,0.55); color: #aaa;
-            font-size: 12px; padding: 3px 10px; border-radius: 20px;
+            font-size: 11px; padding: 3px 10px; border-radius: 20px;
             white-space: nowrap; pointer-events: none;
         }
 
-        /* Кнопки поверх камери */
         #cam-controls {
             position: absolute; top: 10px; right: 10px;
             display: flex; flex-direction: column; gap: 8px; z-index: 10;
@@ -87,20 +72,29 @@
             background: rgba(0,0,0,0.55); border: 2px solid rgba(255,255,255,0.25);
             color: white; font-size: 19px; cursor: pointer;
             display: flex; align-items: center; justify-content: center;
-            transition: background 0.2s, border-color 0.2s;
+            -webkit-tap-highlight-color: transparent;
             user-select: none;
         }
-        .cam-btn.active { background: rgba(46,166,255,0.7); border-color: #2ea6ff; }
+        .cam-btn.active   { background: rgba(46,166,255,0.7); border-color: #2ea6ff; }
         .cam-btn.torch-on { background: rgba(255,220,0,0.75); border-color: #ffd700; }
         .cam-btn.hidden   { display: none; }
 
-        /* ── Нижня панель ─────────────────────────────── */
-        .stats { flex: 1; padding: 12px 12px 10px; display: flex; flex-direction: column; min-height: 0; }
+        #fps-label {
+            position: absolute; top: 8px; left: 8px;
+            background: rgba(0,0,0,0.5); color: #4caf50;
+            font-size: 10px; padding: 2px 6px; border-radius: 4px;
+            pointer-events: none; display: none;
+        }
+
+        .stats {
+            flex: 1; padding: 12px 12px 10px;
+            display: flex; flex-direction: column; min-height: 0;
+        }
         .top-bar {
             display: flex; justify-content: space-between; align-items: center;
             margin-bottom: 8px; flex-shrink: 0;
         }
-        #count-text { color: #4caf50; margin: 0; font-size: 18px; font-weight: bold; }
+        #count-text { color: #4caf50; font-size: 18px; font-weight: bold; }
         .icon-btn {
             background: #2a3a4a; border: none; color: #ccc;
             border-radius: 8px; padding: 7px 13px; font-size: 18px; cursor: pointer;
@@ -119,7 +113,6 @@
             font-weight: bold; box-shadow: 0 4px 10px rgba(0,0,0,0.3); flex-shrink: 0;
         }
 
-        /* ── Модальний ввід ───────────────────────────── */
         #manual-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.65); display: none; align-items: flex-end; z-index: 100; }
         #manual-modal.open { display: flex; }
         .modal-box { background: #243447; width: 100%; padding: 20px; border-radius: 16px 16px 0 0; border-top: 2px solid #2ea6ff; }
@@ -135,11 +128,10 @@
         .btn-cancel { background: #3a4a5a; color: #aaa; }
         .btn-add    { background: #2ea6ff; color: white; }
 
-        /* ── Лоадер ───────────────────────────────────── */
         #loader {
             position: absolute; inset: 0; background: #000;
             display: flex; align-items: center; justify-content: center;
-            flex-direction: column; gap: 10px; color: #aaa; font-size: 14px;
+            flex-direction: column; gap: 10px; color: #aaa; font-size: 14px; z-index: 20;
         }
         .spinner {
             width: 36px; height: 36px; border: 3px solid #2a3a4a;
@@ -147,41 +139,32 @@
             animation: spin 0.8s linear infinite;
         }
         @keyframes spin { to { transform: rotate(360deg); } }
-
-        /* html5-qrcode override for iOS */
-        #ios-reader { width: 100%; height: 100%; }
-        #ios-reader video { width: 100% !important; height: 100% !important; object-fit: cover !important; }
-        #ios-reader img { display: none !important; }
-        #ios-reader__dashboard { display: none !important; }
-        #ios-reader__scan_region { width: 100% !important; height: 100% !important; }
     </style>
 </head>
 <body>
 
 <div id="cam-wrapper">
-    <video id="video" autoplay playsinline muted></video>
-    <canvas id="canvas" style="display:none;"></canvas>
+    <video id="video" autoplay playsinline muted webkit-playsinline></video>
+    <canvas id="scan-canvas"></canvas>
 
     <div id="loader">
         <div class="spinner"></div>
         <span id="loader-text">Ініціалізація...</span>
     </div>
 
-    <!-- Рамка з кутовими маркерами -->
     <div id="scan-frame" data-mode="qr" style="display:none;">
-        <div class="corner tl"></div>
-        <div class="corner tr"></div>
-        <div class="corner bl"></div>
-        <div class="corner br"></div>
+        <div class="corner tl"></div><div class="corner tr"></div>
+        <div class="corner bl"></div><div class="corner br"></div>
         <span id="mode-hint">QR-код</span>
     </div>
 
     <div id="status-label">Наведіть на код</div>
+    <div id="fps-label">0 fps</div>
 
     <div id="cam-controls">
-        <button class="cam-btn hidden" id="torch-btn"  onclick="toggleTorch()" title="Ліхтарик">🔦</button>
-        <button class="cam-btn"        id="mode-btn"   onclick="toggleMode()"  title="QR / Штрих-код">⬛</button>
-        <button class="cam-btn"        id="manual-btn" onclick="openManual()"  title="Ввести вручну">⌨️</button>
+        <button class="cam-btn hidden" id="torch-btn"  onclick="toggleTorch()"  title="Ліхтарик">🔦</button>
+        <button class="cam-btn"        id="mode-btn"   onclick="toggleMode()"   title="QR / Штрих-код">⬛</button>
+        <button class="cam-btn"        id="manual-btn" onclick="openManual()"   title="Вручну">⌨️</button>
     </div>
 </div>
 
@@ -209,337 +192,536 @@
 </div>
 
 <script>
+/* ═══════════════════════════════════════════════════════════════════
+   GREENTECH SCANNER — Production v3.0
+
+   Engine selection:
+     1. BarcodeDetector  → Android / Chrome (native GPU decode)
+     2. ZXing direct     → iOS Safari / all others (no wrapper libs)
+
+   iOS killer features removed:
+     - html5-qrcode (wraps ZXing in slow abstractions, destroys custom UI)
+     - ZBar WASM (dynamic import fails in WKWebView sometimes)
+
+   What kills FPS on iPhone:
+     1. ctx.getImageData() — GPU→CPU readback, ~10ms per call on large canvas
+     2. Decode every RAF frame (60fps) — ZXing needs 20-50ms per decode
+     3. Multiple MediaStream instances / stream not stopped properly
+     4. CSS transitions firing during decode loop
+     5. Creating new ZXing reader instance per frame
+     6. Large canvas (1280×720) instead of ROI-cropped small canvas
+     7. html5-qrcode internal polling + DOM manipulations
+═══════════════════════════════════════════════════════════════════ */
+
 (async () => {
-    const tg = window.Telegram?.WebApp;
-    if (!tg) { document.getElementById('loader-text').textContent = 'Відкрийте в Telegram'; return; }
-    tg.expand();
 
-    const video    = document.getElementById('video');
-    const canvas   = document.getElementById('canvas');
-    const ctx      = canvas.getContext('2d', { willReadFrequently: true });
-    const loader   = document.getElementById('loader');
-    const loaderTx = document.getElementById('loader-text');
-    const frame    = document.getElementById('scan-frame');
-    const modeHint = document.getElementById('mode-hint');
-    const modeBtn  = document.getElementById('mode-btn');
+const tg = window.Telegram?.WebApp;
+if (!tg) {
+    document.getElementById('loader-text').textContent = 'Відкрийте в Telegram';
+    return;
+}
+tg.expand();
 
-    let scannedCodes = [];
-    let lastScanTime = 0;
-    let lastErrTime  = 0;
-    const COOLDOWN   = 1500;
-    let torchOn      = false;
-    let videoTrack   = null;
-    let frameMode    = 'qr';
-    let autoMode     = true;
+/* ─── DOM refs ──────────────────────────────────────────── */
+const video      = document.getElementById('video');
+const scanCanvas = document.getElementById('scan-canvas');
+const ctx        = scanCanvas.getContext('2d', { willReadFrequently: true, alpha: false });
+const loader     = document.getElementById('loader');
+const loaderTx   = document.getElementById('loader-text');
+const frame      = document.getElementById('scan-frame');
+const modeHint   = document.getElementById('mode-hint');
+const modeBtn    = document.getElementById('mode-btn');
+const statusLbl  = document.getElementById('status-label');
 
-    const IS_2D = new Set(['qr_code','data_matrix','aztec','ZBAR_QRCODE','ZBAR_SQCODE','QR_CODE']);
+/* ─── State ─────────────────────────────────────────────── */
+let scannedCodes  = [];
+let lastScanTime  = 0;
+let lastErrTime   = 0;
+let torchOn       = false;
+let videoTrack    = null;
+let frameMode     = 'qr';    // 'qr' | 'barcode'
+let autoMode      = true;
+let scanActive    = false;
+let rafId         = null;
 
-    /* ── Рамка ────────────────────────────────── */
-    function setFrameMode(mode, auto = false) {
-        if (auto && !autoMode) return;
-        frameMode = mode;
-        frame.dataset.mode = mode;
-        modeHint.textContent = mode === 'qr' ? 'QR-код' : 'Штрих-код';
-        modeBtn.textContent  = mode === 'qr' ? '⬛' : '▬';
-        modeBtn.classList.toggle('active', !autoMode);
-    }
-    window.toggleMode = () => {
-        autoMode = false;
-        setFrameMode(frameMode === 'qr' ? 'barcode' : 'qr');
-        tg.HapticFeedback?.impactOccurred('light');
-        clearTimeout(window._autoModeTimer);
-        window._autoModeTimer = setTimeout(() => { autoMode = true; }, 10000);
-    };
-    function flashFrame(type) {
-        frame.classList.remove('hit', 'dup');
-        void frame.offsetWidth;
-        frame.classList.add(type);
-        setTimeout(() => frame.classList.remove(type), type === 'hit' ? COOLDOWN : 500);
-    }
+const SCAN_COOLDOWN = 1500;  // ms between same code
+const DECODE_INTERVAL = 100; // ms between decode attempts (10fps max)
+const IS_2D = new Set(['qr_code','data_matrix','aztec','QR_CODE','DATA_MATRIX','AZTEC',
+                       'ZBAR_QRCODE','ZBAR_SQCODE']);
 
-    /* ── Звук (lazy) ──────────────────────────── */
-    let actx = null;
-    function beep(ok) {
-        try {
-            if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
-            if (actx.state === 'suspended') actx.resume();
-        } catch(e) { return; }
-        const o = actx.createOscillator(), g = actx.createGain();
-        o.connect(g); g.connect(actx.destination);
-        if (ok) {
-            o.type = 'sine'; o.frequency.value = 1000;
-            g.gain.setValueAtTime(1, actx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.1);
-            o.start(); o.stop(actx.currentTime + 0.1);
-        } else {
-            o.type = 'sawtooth'; o.frequency.value = 200;
-            g.gain.setValueAtTime(1, actx.currentTime);
-            g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.3);
-            o.start(); o.stop(actx.currentTime + 0.3);
-        }
-    }
+/* ─── iOS detection ─────────────────────────────────────── */
+const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+              (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 
-    /* ── UI ───────────────────────────────────── */
-    function updateUI() {
-        const n = scannedCodes.length;
-        document.getElementById('count-text').innerText = 'Відскановано: ' + n;
-        const list    = document.getElementById('codes-list');
-        const sendBtn = document.getElementById('send-btn');
-        const clrBtn  = document.getElementById('clear-btn');
-        if (n === 0) {
-            list.innerHTML = "<p style='color:#aaa;margin:0;'>Наведіть рамку на код(и)</p>";
-            sendBtn.style.display = clrBtn.style.display = 'none';
-        } else {
-            list.innerHTML = scannedCodes.map((c, i) => `
-                <div class="code-row">
-                    <span>${c}</span>
-                    <span class="del-btn" onclick="removeCode(${i})">✕</span>
-                </div>`).join('');
-            sendBtn.style.display = clrBtn.style.display = 'block';
-        }
-    }
-    window.removeCode = i => { scannedCodes.splice(i, 1); tg.HapticFeedback?.impactOccurred('light'); updateUI(); };
-    window.clearAll   = () => { scannedCodes = []; tg.HapticFeedback?.impactOccurred('medium'); updateUI(); };
+/* ════════════════════════════════════════════════════════════
+   CAMERA INIT
+   iOS-specific constraints: exact facingMode may fail in WKWebView,
+   so we try ideal first, fall back to plain string.
+════════════════════════════════════════════════════════════ */
+async function initCamera() {
+    loaderTx.textContent = 'Запит доступу до камери...';
 
-    /* ── Обробка декодованого ─────────────────── */
-    function handleDecoded({ value: text, format }) {
-        const now = Date.now();
-        if (!text || text.length < 3) return;
-
-        // Ignore URL QR codes
-        if (/^https?:\/\//i.test(text) || /^www\./i.test(text)) return;
-
-        const is2D = IS_2D.has(format) || (typeof format === 'string' && format.toLowerCase().includes('qr'));
-        setFrameMode(is2D ? 'qr' : 'barcode', true);
-
-        // Split multi-serial QR codes (newline / comma / semicolon delimited)
-        const parts = text.split(/[\r\n,;]+/).map(s => s.trim()).filter(s => s.length >= 3);
-
-        if (parts.length > 1) {
-            if (now - lastScanTime < COOLDOWN) return;
-            lastScanTime = now;
-            const newParts = parts.filter(p => !scannedCodes.includes(p));
-            if (newParts.length > 0) {
-                scannedCodes.unshift(...newParts);
-                beep(true);
-                tg.HapticFeedback?.notificationOccurred('success');
-                flashFrame('hit');
-                updateUI();
-            } else {
-                if (now - lastErrTime > 2000) {
-                    lastErrTime = now; beep(false);
-                    tg.HapticFeedback?.notificationOccurred('error'); flashFrame('dup');
-                }
+    const constraint_sets = [
+        /* 1st try: ideal 720p, continuous focus (iOS 15+) */
+        {
+            video: {
+                facingMode: { ideal: 'environment' },
+                width:  { ideal: 1280, max: 1920 },
+                height: { ideal: 720,  max: 1080 },
+                frameRate: { ideal: 30, max: 30 },
+                /* Continuous AF — may be ignored on older iOS but never throws */
+                advanced: [{ focusMode: 'continuous' }]
             }
+        },
+        /* 2nd try: relaxed, no advanced */
+        {
+            video: {
+                facingMode: 'environment',
+                width:  { ideal: 1280 },
+                height: { ideal: 720  }
+            }
+        },
+        /* 3rd try: minimal */
+        { video: { facingMode: 'environment' } },
+        /* 4th try: any camera */
+        { video: true }
+    ];
+
+    let stream = null;
+    for (const c of constraint_sets) {
+        try {
+            stream = await navigator.mediaDevices.getUserMedia(c);
+            break;
+        } catch (e) {
+            if (e.name === 'NotAllowedError') throw e; // permissions denied — no point retrying
+        }
+    }
+    if (!stream) throw new Error('Камера недоступна');
+
+    /* iOS requires these attributes synchronously before srcObject */
+    video.setAttribute('autoplay', '');
+    video.setAttribute('playsinline', '');
+    video.setAttribute('muted', '');
+    video.muted = true;
+    video.srcObject = stream;
+
+    await new Promise((resolve, reject) => {
+        video.onloadedmetadata = resolve;
+        video.onerror = reject;
+        setTimeout(reject, 8000, new Error('Timeout'));
+    });
+
+    try { await video.play(); } catch (e) {
+        /* iOS autoplay may need user gesture; video.play() inside async is usually fine */
+    }
+
+    videoTrack = stream.getVideoTracks()[0];
+
+    /* Enable torch button if supported */
+    try {
+        const caps = videoTrack.getCapabilities?.() || {};
+        if (caps.torch) document.getElementById('torch-btn').classList.remove('hidden');
+    } catch(e) {}
+
+    /* Try to request continuous autofocus explicitly */
+    try {
+        await videoTrack.applyConstraints({ advanced: [{ focusMode: 'continuous' }] });
+    } catch(e) { /* not supported — silently ignore */ }
+
+    loader.style.display = 'none';
+    frame.style.display  = 'block';
+}
+
+/* ════════════════════════════════════════════════════════════
+   ROI CAPTURE
+   Key iOS optimization: capture only the center region that
+   corresponds to the visible scan frame. Smaller canvas =
+   smaller getImageData = less GPU→CPU transfer time.
+
+   ROI canvas sizes:
+     QR:      ~55% of frame → ~480×480 px
+     Barcode: ~80% wide × ~28% tall → ~640×160 px
+════════════════════════════════════════════════════════════ */
+function captureROI() {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh || video.readyState < 2) return false;
+
+    let roiW, roiH;
+    if (frameMode === 'qr') {
+        /* Square ROI, 55% of shorter dimension */
+        const side = Math.round(Math.min(vw, vh) * 0.55);
+        roiW = side; roiH = side;
+    } else {
+        /* Wide strip, full width × 28% height */
+        roiW = Math.round(vw * 0.82);
+        roiH = Math.round(vh * 0.28);
+    }
+    const roiX = Math.round((vw - roiW) / 2);
+    const roiY = Math.round((vh - roiH) / 2);
+
+    /* Reuse canvas — avoid creating new canvas each frame */
+    if (scanCanvas.width !== roiW || scanCanvas.height !== roiH) {
+        scanCanvas.width  = roiW;
+        scanCanvas.height = roiH;
+    }
+
+    ctx.drawImage(video, roiX, roiY, roiW, roiH, 0, 0, roiW, roiH);
+    return true;
+}
+
+/* ════════════════════════════════════════════════════════════
+   ZXING ENGINE (iOS / Safari / fallback)
+
+   Critical: create ONE MultiFormatReader and reuse it.
+   Creating a new reader per frame allocates ~2MB and triggers GC.
+
+   TRY_HARDER: true — helps with small/rotated QR on iPhone camera.
+   Set to false only if decode time > 40ms consistently.
+════════════════════════════════════════════════════════════ */
+function buildZXingReader() {
+    const hints = new Map([
+        [ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+            ZXing.BarcodeFormat.QR_CODE,
+            ZXing.BarcodeFormat.DATA_MATRIX,
+            ZXing.BarcodeFormat.EAN_13,
+            ZXing.BarcodeFormat.EAN_8,
+            ZXing.BarcodeFormat.CODE_128,
+            ZXing.BarcodeFormat.CODE_39,
+            ZXing.BarcodeFormat.CODE_93,
+            ZXing.BarcodeFormat.UPC_A,
+            ZXing.BarcodeFormat.UPC_E,
+            ZXing.BarcodeFormat.ITF,
+        ]],
+        [ZXing.DecodeHintType.TRY_HARDER, true],
+        [ZXing.DecodeHintType.CHARACTER_SET, 'UTF-8'],
+    ]);
+    const reader = new ZXing.MultiFormatReader();
+    reader.setHints(hints);
+    return reader;
+}
+
+function zxingDecode(reader) {
+    /* getImageData is the #1 bottleneck on iOS — minimize canvas size (done via ROI) */
+    const imgData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
+    const lum = new ZXing.RGBLuminanceSource(imgData.data, scanCanvas.width, scanCanvas.height);
+    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
+    const res = reader.decode(bmp);
+    const fmt = ZXing.BarcodeFormat[res.getBarcodeFormat()] || 'UNKNOWN';
+    return { value: res.getText(), format: fmt };
+}
+
+/* ════════════════════════════════════════════════════════════
+   SCAN LOOP — throttled RAF
+
+   Pattern: schedule RAF, check elapsed time, decode only if
+   DECODE_INTERVAL passed AND previous decode finished.
+   This prevents decode queue buildup (main iOS lag source).
+
+   FPS meter: for debug (hidden by default).
+════════════════════════════════════════════════════════════ */
+let lastDecodeTs  = 0;
+let decoding      = false;
+let fpsFrameCount = 0;
+let fpsMeasureTs  = 0;
+
+function startScanLoop(decodeFn) {
+    scanActive = true;
+    lastDecodeTs = 0;
+
+    function loop(ts) {
+        if (!scanActive) return;
+
+        /* FPS meter */
+        fpsFrameCount++;
+        if (ts - fpsMeasureTs >= 1000) {
+            /* Uncomment to show FPS:
+            document.getElementById('fps-label').textContent = fpsFrameCount + ' fps';
+            */
+            fpsFrameCount = 0; fpsMeasureTs = ts;
+        }
+
+        /* Skip if tab hidden or decode already running */
+        if (document.hidden || decoding) {
+            rafId = requestAnimationFrame(loop);
             return;
         }
 
-        if (scannedCodes.includes(text)) {
+        /* Throttle: only decode every DECODE_INTERVAL ms */
+        if (ts - lastDecodeTs < DECODE_INTERVAL) {
+            rafId = requestAnimationFrame(loop);
+            return;
+        }
+
+        lastDecodeTs = ts;
+        decoding = true;
+
+        /* Capture ROI — fast sync operation */
+        if (!captureROI()) {
+            decoding = false;
+            rafId = requestAnimationFrame(loop);
+            return;
+        }
+
+        /* Decode — may be async (BarcodeDetector) or sync (ZXing) */
+        Promise.resolve()
+            .then(() => decodeFn())
+            .then(result => { if (result) handleDecoded(result); })
+            .catch(() => { /* NotFoundException = no code found, normal */ })
+            .finally(() => {
+                decoding = false;
+                if (scanActive) rafId = requestAnimationFrame(loop);
+            });
+    }
+
+    rafId = requestAnimationFrame(loop);
+}
+
+function stopScanLoop() {
+    scanActive = false;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+}
+
+/* ════════════════════════════════════════════════════════════
+   BACKGROUND / FOREGROUND handling
+   Stop decode loop when tab hidden (saves battery on iPhone).
+════════════════════════════════════════════════════════════ */
+document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+        /* Pause: RAF loop checks document.hidden internally */
+    }
+    /* Resume happens automatically on next RAF tick */
+});
+
+/* ════════════════════════════════════════════════════════════
+   SCAN FRAME VISUAL
+════════════════════════════════════════════════════════════ */
+function setFrameMode(mode, auto = false) {
+    if (auto && !autoMode) return;
+    frameMode = mode;
+    frame.dataset.mode = mode;
+    modeHint.textContent = mode === 'qr' ? 'QR-код' : 'Штрих-код';
+    modeBtn.textContent  = mode === 'qr' ? '⬛' : '▬';
+    modeBtn.classList.toggle('active', !autoMode);
+}
+
+window.toggleMode = () => {
+    autoMode = false;
+    setFrameMode(frameMode === 'qr' ? 'barcode' : 'qr');
+    tg.HapticFeedback?.impactOccurred('light');
+    clearTimeout(window._autoModeTimer);
+    window._autoModeTimer = setTimeout(() => { autoMode = true; }, 15000);
+};
+
+let flashTimer = null;
+function flashFrame(type) {
+    frame.classList.remove('hit', 'dup');
+    /* Force reflow only when needed — avoid during active decode */
+    void frame.offsetWidth;
+    frame.classList.add(type);
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => frame.classList.remove(type), type === 'hit' ? SCAN_COOLDOWN : 500);
+}
+
+/* ════════════════════════════════════════════════════════════
+   AUDIO — lazy init, Web Audio API
+   Lazy because iOS AudioContext requires user gesture.
+════════════════════════════════════════════════════════════ */
+let actx = null;
+function beep(ok) {
+    try {
+        if (!actx) actx = new (window.AudioContext || window.webkitAudioContext)();
+        if (actx.state === 'suspended') actx.resume();
+    } catch(e) { return; }
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.connect(g); g.connect(actx.destination);
+    if (ok) {
+        o.type = 'sine'; o.frequency.value = 1000;
+        g.gain.setValueAtTime(0.8, actx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.1);
+        o.start(); o.stop(actx.currentTime + 0.1);
+    } else {
+        o.type = 'sawtooth'; o.frequency.value = 220;
+        g.gain.setValueAtTime(0.5, actx.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, actx.currentTime + 0.25);
+        o.start(); o.stop(actx.currentTime + 0.25);
+    }
+}
+
+/* ════════════════════════════════════════════════════════════
+   RESULT HANDLER
+════════════════════════════════════════════════════════════ */
+function handleDecoded({ value: text, format }) {
+    const now = Date.now();
+    if (!text || text.length < 3) return;
+    if (/^https?:\/\//i.test(text) || /^www\./i.test(text)) return;
+
+    const is2D = IS_2D.has(format) || (typeof format === 'string' && format.toLowerCase().includes('qr'));
+    setFrameMode(is2D ? 'qr' : 'barcode', true);
+
+    /* Multi-serial QR (split by newline / comma / semicolon) */
+    const parts = text.split(/[\r\n,;]+/).map(s => s.trim()).filter(s => s.length >= 3);
+    if (parts.length > 1) {
+        if (now - lastScanTime < SCAN_COOLDOWN) return;
+        lastScanTime = now;
+        const newParts = parts.filter(p => !scannedCodes.includes(p));
+        if (newParts.length > 0) {
+            scannedCodes.unshift(...newParts);
+            beep(true); tg.HapticFeedback?.notificationOccurred('success');
+            flashFrame('hit'); updateUI();
+        } else {
             if (now - lastErrTime > 2000) {
                 lastErrTime = now; beep(false);
                 tg.HapticFeedback?.notificationOccurred('error'); flashFrame('dup');
             }
-            return;
         }
-        if (now - lastScanTime < COOLDOWN) return;
-        lastScanTime = now;
-        scannedCodes.unshift(text);
-        beep(true);
-        tg.HapticFeedback?.notificationOccurred('success');
-        flashFrame('hit');
-        updateUI();
+        return;
     }
 
-    /* ── Декодування знімка через ZXing ─────────── */
-    function decodeImageFile(file) {
-        return new Promise((resolve, reject) => {
-            const url = URL.createObjectURL(file);
-            const img = new Image();
-            img.onload = () => {
-                URL.revokeObjectURL(url);
-                const MAX = 1280;
-                let w = img.width, h = img.height;
-                if (w > MAX || h > MAX) {
-                    const s = Math.min(MAX / w, MAX / h);
-                    w = Math.round(w * s); h = Math.round(h * s);
-                }
-                const cvs = document.createElement('canvas');
-                cvs.width = w; cvs.height = h;
-                const c2d = cvs.getContext('2d');
-                c2d.drawImage(img, 0, 0, w, h);
-                const imgData = c2d.getImageData(0, 0, w, h);
-                try {
-                    const hints = new Map([
-                        [ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-                            ZXing.BarcodeFormat.QR_CODE,   ZXing.BarcodeFormat.DATA_MATRIX,
-                            ZXing.BarcodeFormat.EAN_13,    ZXing.BarcodeFormat.EAN_8,
-                            ZXing.BarcodeFormat.CODE_128,  ZXing.BarcodeFormat.CODE_39,
-                            ZXing.BarcodeFormat.CODE_93,   ZXing.BarcodeFormat.UPC_A,
-                            ZXing.BarcodeFormat.UPC_E,     ZXing.BarcodeFormat.ITF,
-                        ]],
-                        [ZXing.DecodeHintType.TRY_HARDER, true],
-                    ]);
-                    const zxr = new ZXing.MultiFormatReader();
-                    zxr.setHints(hints);
-                    const lum = new ZXing.RGBLuminanceSource(imgData.data, w, h);
-                    const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
-                    const res = zxr.decode(bmp);
-                    const fmt = ZXing.BarcodeFormat[res.getBarcodeFormat()] || 'UNKNOWN';
-                    resolve({ value: res.getText(), format: fmt });
-                } catch(e) { reject(e); }
-            };
-            img.onerror = reject;
-            img.src = url;
-        });
-    }
-
-    /* ── Кроп відео до активної рамки ──────────── */
-    function captureFrameRegion() {
-        if (!video.videoWidth || !frame.offsetWidth) return null;
-        const fw = frame.offsetWidth,  fh = frame.offsetHeight;
-        const vw = video.offsetWidth,  vh = video.offsetHeight;
-        const scaleX = video.videoWidth  / vw;
-        const scaleY = video.videoHeight / vh;
-        const fx  = (vw / 2 - fw / 2) * scaleX;
-        const fy  = (vh / 2 - fh / 2) * scaleY;
-        const fw2 = Math.round(fw * scaleX), fh2 = Math.round(fh * scaleY);
-        canvas.width = fw2; canvas.height = fh2;
-        ctx.drawImage(video, fx, fy, fw2, fh2, 0, 0, fw2, fh2);
-        return canvas;
-    }
-
-    /* ── Ініціалізація камери (тільки де потрібна) ── */
-    async function initCamera() {
-        loaderTx.textContent = 'Запит доступу до камери...';
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: 'environment', width: { ideal: 1280 }, height: { ideal: 720 } }
-        });
-        video.srcObject = stream;
-        await new Promise(r => video.onloadedmetadata = r);
-        video.play();
-        videoTrack = stream.getVideoTracks()[0];
-        if (videoTrack.getCapabilities?.()?.torch) {
-            document.getElementById('torch-btn').classList.remove('hidden');
+    if (scannedCodes.includes(text)) {
+        if (now - lastErrTime > 2000) {
+            lastErrTime = now; beep(false);
+            tg.HapticFeedback?.notificationOccurred('error'); flashFrame('dup');
         }
-        loader.style.display = 'none';
-        frame.style.display  = 'block';
+        return;
     }
+    if (now - lastScanTime < SCAN_COOLDOWN) return;
+    lastScanTime = now;
+    scannedCodes.unshift(text);
+    beep(true); tg.HapticFeedback?.notificationOccurred('success');
+    flashFrame('hit'); updateUI();
+}
 
-    /* ── Цикл сканування ─────────────────────── */
-    function startScanLoop(decodeFn) {
-        let busy = false;
-        (async function loop() {
-            while (true) {
-                if (!busy && video.readyState >= 2) {
-                    busy = true;
-                    try { const r = await decodeFn(); if (r) handleDecoded(r); } catch(e) {}
-                    busy = false;
-                }
-                await new Promise(r => requestAnimationFrame(r));
-            }
-        })();
-    }
-
-    /* ════════════════════════════════════════════
-       Вибір декодера залежно від платформи
-       ════════════════════════════════════════════ */
-
-    if ('BarcodeDetector' in window) {
-        /* ── Android: Native BarcodeDetector ── */
-        try { await initCamera(); } catch(e) { loaderTx.textContent = 'Камера: ' + e.message; return; }
-        document.getElementById('status-label').textContent = '⚡ Native decoder';
-        const formats = ['qr_code','ean_13','ean_8','code_128','code_39','code_93','data_matrix','upc_a','upc_e','itf','aztec'];
-        let supported = [];
-        try { supported = await BarcodeDetector.getSupportedFormats(); } catch(e) {}
-        const use = formats.filter(f => supported.includes(f));
-        const bd  = new BarcodeDetector({ formats: use.length ? use : ['qr_code','ean_13','code_128'] });
-        startScanLoop(async () => {
-            const c = captureFrameRegion();
-            if (!c) return null;
-            const res = await bd.detect(c);
-            return res.length ? { value: res[0].rawValue, format: res[0].format } : null;
-        });
-
-    } else if (typeof tg.showScanQrPopup === 'function') {
-        /* ── iOS Telegram: html5-qrcode handles iOS WKWebView internally ── */
-        const wrapper = document.getElementById('cam-wrapper');
-        wrapper.innerHTML = '<div id="ios-reader"></div>';
-        loader.style.display = 'none';
-
-        const formats = [];
-        if (typeof Html5QrcodeSupportedFormats !== 'undefined') {
-            const f = Html5QrcodeSupportedFormats;
-            formats.push(f.QR_CODE, f.EAN_13, f.EAN_8, f.CODE_128,
-                         f.CODE_39, f.CODE_93, f.UPC_A, f.UPC_E, f.ITF, f.DATA_MATRIX);
-        }
-
-        const iosScanner = new Html5Qrcode('ios-reader', {
-            formatsToSupport: formats.length ? formats : undefined,
-            verbose: false
-        });
-
-        try {
-            await iosScanner.start(
-                { facingMode: 'environment' },
-                { fps: 10, aspectRatio: 1.777 },
-                (text, result) => {
-                    const fmt = result?.result?.format?.formatName || 'unknown';
-                    handleDecoded({ value: text, format: fmt });
-                },
-                () => {}
-            );
-            document.getElementById('status-label')?.remove();
-            frame.style.display = 'none';
-        } catch(e) {
-            wrapper.innerHTML = `<div style="display:flex;align-items:center;justify-content:center;
-                height:100%;color:#ff3b30;font-size:13px;padding:20px;text-align:center;">
-                ❌ Камера недоступна: ${e.message || e}</div>`;
-        }
-
+/* ════════════════════════════════════════════════════════════
+   UI
+════════════════════════════════════════════════════════════ */
+function updateUI() {
+    const n = scannedCodes.length;
+    document.getElementById('count-text').textContent = 'Відскановано: ' + n;
+    const list    = document.getElementById('codes-list');
+    const sendBtn = document.getElementById('send-btn');
+    const clrBtn  = document.getElementById('clear-btn');
+    if (n === 0) {
+        list.innerHTML = "<p style='color:#aaa;margin:0;'>Наведіть рамку на код(и)</p>";
+        sendBtn.style.display = clrBtn.style.display = 'none';
     } else {
-        /* ── Desktop / інше: ZBar WASM ── */
-        try { await initCamera(); } catch(e) { loaderTx.textContent = 'Камера: ' + e.message; return; }
-        loaderTx.textContent = 'Завантаження ZBar...';
-        loader.style.display = 'flex';
-        frame.style.display  = 'none';
-        let scanImageData;
-        try {
-            const mod = await import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.9.15/dist/main.mjs');
-            scanImageData = mod.scanImageData;
-        } catch(e) { loaderTx.textContent = 'Помилка ZBar: ' + e.message; return; }
-        loader.style.display = 'none';
-        frame.style.display  = 'block';
-        document.getElementById('status-label').textContent = '🔍 ZBar WASM';
-        startScanLoop(async () => {
-            const c = captureFrameRegion();
-            if (!c) return null;
-            const imgData = ctx.getImageData(0, 0, c.width, c.height);
-            const symbols = await scanImageData(imgData);
-            return symbols.length ? { value: symbols[0].decode(), format: symbols[0].typeName } : null;
-        });
+        /* Build HTML string once — avoid multiple DOM mutations */
+        list.innerHTML = scannedCodes.map((c, i) =>
+            `<div class="code-row"><span>${c}</span><span class="del-btn" onclick="removeCode(${i})">✕</span></div>`
+        ).join('');
+        sendBtn.style.display = clrBtn.style.display = 'block';
     }
+}
+window.removeCode = i => { scannedCodes.splice(i, 1); tg.HapticFeedback?.impactOccurred('light'); updateUI(); };
+window.clearAll   = () => { scannedCodes = []; tg.HapticFeedback?.impactOccurred('medium'); updateUI(); };
 
-    /* ── Ліхтарик ─────────────────────────────── */
-    window.toggleTorch = async () => {
-        if (!videoTrack) return;
-        torchOn = !torchOn;
-        try {
-            await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
-            document.getElementById('torch-btn').classList.toggle('torch-on', torchOn);
-            tg.HapticFeedback?.impactOccurred('light');
-        } catch(e) { torchOn = !torchOn; }
-    };
+/* ════════════════════════════════════════════════════════════
+   TORCH
+════════════════════════════════════════════════════════════ */
+window.toggleTorch = async () => {
+    if (!videoTrack) return;
+    torchOn = !torchOn;
+    try {
+        await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+        document.getElementById('torch-btn').classList.toggle('torch-on', torchOn);
+        tg.HapticFeedback?.impactOccurred('light');
+    } catch(e) { torchOn = !torchOn; }
+};
 
-    /* ── Ручний ввід ──────────────────────────── */
-    window.openManual  = () => { document.getElementById('manual-modal').classList.add('open'); setTimeout(() => document.getElementById('manual-input').focus(), 100); };
-    window.closeManual = () => { document.getElementById('manual-modal').classList.remove('open'); document.getElementById('manual-input').value = ''; };
-    window.addManual   = () => { const v = document.getElementById('manual-input').value.trim(); if (v) handleDecoded({ value: v, format: 'manual' }); closeManual(); };
-    document.getElementById('manual-input').addEventListener('keydown', e => { if (e.key === 'Enter') addManual(); });
+/* ════════════════════════════════════════════════════════════
+   MANUAL INPUT
+════════════════════════════════════════════════════════════ */
+window.openManual = () => {
+    document.getElementById('manual-modal').classList.add('open');
+    setTimeout(() => document.getElementById('manual-input').focus(), 150);
+};
+window.closeManual = () => {
+    document.getElementById('manual-modal').classList.remove('open');
+    document.getElementById('manual-input').value = '';
+};
+window.addManual = () => {
+    const v = document.getElementById('manual-input').value.trim();
+    if (v) handleDecoded({ value: v, format: 'manual' });
+    closeManual();
+};
+document.getElementById('manual-input').addEventListener('keydown', e => { if (e.key === 'Enter') addManual(); });
 
-    /* ── Відправка ────────────────────────────── */
-    window.sendData = () => { if (scannedCodes.length) { tg.sendData(scannedCodes.join('|')); tg.close(); } };
+/* ════════════════════════════════════════════════════════════
+   SEND DATA + CLEANUP
+════════════════════════════════════════════════════════════ */
+window.sendData = () => {
+    if (!scannedCodes.length) return;
+    stopScanLoop();
+    /* Stop camera tracks — prevent memory leak and battery drain */
+    if (videoTrack) { videoTrack.stop(); videoTrack = null; }
+    if (video.srcObject) {
+        video.srcObject.getTracks().forEach(t => t.stop());
+        video.srcObject = null;
+    }
+    /* Release AudioContext */
+    if (actx) { actx.close(); actx = null; }
+    tg.sendData(scannedCodes.join('|'));
+    tg.close();
+};
 
-})();
+/* ════════════════════════════════════════════════════════════
+   ENGINE SELECTION AND STARTUP
+════════════════════════════════════════════════════════════ */
+try {
+    await initCamera();
+} catch(e) {
+    loader.style.display = 'flex';
+    loaderTx.textContent = '❌ ' + (e.message || 'Помилка камери');
+    return;
+}
+
+if ('BarcodeDetector' in window) {
+    /* ── ENGINE 1: Native BarcodeDetector (Android / Chrome) ── */
+    statusLbl.textContent = '⚡ Native';
+
+    let supported = [];
+    try { supported = await BarcodeDetector.getSupportedFormats(); } catch(e) {}
+    const wantFormats = ['qr_code','ean_13','ean_8','code_128','code_39','code_93',
+                         'data_matrix','upc_a','upc_e','itf','aztec'];
+    const useFormats = supported.length
+        ? wantFormats.filter(f => supported.includes(f))
+        : ['qr_code','ean_13','code_128'];
+
+    const bd = new BarcodeDetector({ formats: useFormats });
+
+    startScanLoop(async () => {
+        /* BarcodeDetector accepts canvas directly — no getImageData needed */
+        const results = await bd.detect(scanCanvas);
+        if (!results.length) return null;
+        return { value: results[0].rawValue, format: results[0].format };
+    });
+
+} else {
+    /* ── ENGINE 2: ZXing direct (iOS Safari / Desktop / fallback) ── */
+    const engine = isIOS ? '🍎 ZXing/iOS' : '🔍 ZXing';
+    statusLbl.textContent = engine;
+
+    /* Single reader instance — NEVER recreate inside the loop */
+    const zxReader = buildZXingReader();
+
+    startScanLoop(() => {
+        /* Sync decode — wrapped in Promise for uniform interface */
+        return new Promise((resolve, reject) => {
+            try {
+                resolve(zxingDecode(zxReader));
+            } catch(e) {
+                /* NotFoundException is normal (no code in frame) */
+                if (e?.name === 'NotFoundException' || e?.message?.includes('not found')) {
+                    resolve(null);
+                } else {
+                    reject(e);
+                }
+            }
+        });
+    });
+}
+
+})(); /* end IIFE */
 </script>
 </body>
 </html>
