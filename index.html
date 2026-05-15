@@ -243,6 +243,7 @@ let frameMode     = 'qr';    // 'qr' | 'barcode'
 let autoMode      = true;
 let scanActive    = false;
 let rafId         = null;
+let engineLabel   = '...';   // set after engine selection, used by error display
 
 const SCAN_COOLDOWN = 1500;  // ms between same code
 const DECODE_INTERVAL = 100; // ms between decode attempts (10fps max)
@@ -340,22 +341,23 @@ async function initCamera() {
    smaller getImageData = less GPU→CPU transfer time.
 
    ROI canvas sizes:
-     QR:      ~55% of frame → ~480×480 px
-     Barcode: ~80% wide × ~28% tall → ~640×160 px
+     QR:      ~70% of shorter dim (larger = more reliable on iOS)
+     Barcode: ~82% wide × ~30% tall
 ════════════════════════════════════════════════════════════ */
 function captureROI() {
     const vw = video.videoWidth, vh = video.videoHeight;
-    if (!vw || !vh || video.readyState < 2) return false;
+    /* video.currentTime > 0 guards against iOS black first-frame bug */
+    if (!vw || !vh || video.readyState < 2 || !video.currentTime) return false;
 
     let roiW, roiH;
     if (frameMode === 'qr') {
-        /* Square ROI, 55% of shorter dimension */
-        const side = Math.round(Math.min(vw, vh) * 0.55);
+        /* Square ROI, 70% of shorter dimension — larger helps ZXing on iPhone */
+        const side = Math.round(Math.min(vw, vh) * 0.70);
         roiW = side; roiH = side;
     } else {
-        /* Wide strip, full width × 28% height */
+        /* Wide strip, full width × 30% height */
         roiW = Math.round(vw * 0.82);
-        roiH = Math.round(vh * 0.28);
+        roiH = Math.round(vh * 0.30);
     }
     const roiX = Math.round((vw - roiW) / 2);
     const roiY = Math.round((vh - roiH) / 2);
@@ -376,8 +378,12 @@ function captureROI() {
    Critical: create ONE MultiFormatReader and reuse it.
    Creating a new reader per frame allocates ~2MB and triggers GC.
 
+   HTMLCanvasElementLuminanceSource is used instead of RGBLuminanceSource:
+   - RGBLuminanceSource expects RGB stride but canvas gives RGBA (4 bytes/px)
+   - HTMLCanvasElementLuminanceSource handles this correctly internally
+   - No need to call ctx.getImageData() manually
+
    TRY_HARDER: true — helps with small/rotated QR on iPhone camera.
-   Set to false only if decode time > 40ms consistently.
 ════════════════════════════════════════════════════════════ */
 function buildZXingReader() {
     const hints = new Map([
@@ -402,9 +408,9 @@ function buildZXingReader() {
 }
 
 function zxingDecode(reader) {
-    /* getImageData is the #1 bottleneck on iOS — minimize canvas size (done via ROI) */
-    const imgData = ctx.getImageData(0, 0, scanCanvas.width, scanCanvas.height);
-    const lum = new ZXing.RGBLuminanceSource(imgData.data, scanCanvas.width, scanCanvas.height);
+    /* HTMLCanvasElementLuminanceSource reads RGBA canvas data correctly.
+       RGBLuminanceSource misinterprets the 4-byte-per-pixel RGBA stride as 3-byte RGB. */
+    const lum = new ZXing.HTMLCanvasElementLuminanceSource(scanCanvas);
     const bmp = new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(lum));
     const res = reader.decode(bmp);
     const fmt = ZXing.BarcodeFormat[res.getBarcodeFormat()] || 'UNKNOWN';
@@ -467,7 +473,15 @@ function startScanLoop(decodeFn) {
         Promise.resolve()
             .then(() => decodeFn())
             .then(result => { if (result) handleDecoded(result); })
-            .catch(() => { /* NotFoundException = no code found, normal */ })
+            .catch(e => {
+                /* NotFoundException = no code in frame, completely normal */
+                const msg = e?.message || String(e || '');
+                if (msg && !msg.toLowerCase().includes('not found') && e?.name !== 'NotFoundException') {
+                    /* Unexpected error — show briefly for iOS debugging */
+                    statusLbl.textContent = '⚠ ' + msg.substring(0, 50);
+                    setTimeout(() => { statusLbl.textContent = engineLabel; }, 3000);
+                }
+            })
             .finally(() => {
                 decoding = false;
                 if (scanActive) rafId = requestAnimationFrame(loop);
@@ -508,7 +522,7 @@ function setFrameMode(mode, auto = false) {
 window.toggleMode = () => {
     autoMode = false;
     setFrameMode(frameMode === 'qr' ? 'barcode' : 'qr');
-    tg.HapticFeedback?.impactOccurred('light');
+    tg.HapticFeedback?.impactOccurred?.('light');
     clearTimeout(window._autoModeTimer);
     window._autoModeTimer = setTimeout(() => { autoMode = true; }, 15000);
 };
@@ -567,12 +581,12 @@ function handleDecoded({ value: text, format }) {
         const newParts = parts.filter(p => !scannedCodes.includes(p));
         if (newParts.length > 0) {
             scannedCodes.unshift(...newParts);
-            beep(true); tg.HapticFeedback?.notificationOccurred('success');
+            beep(true); tg.HapticFeedback?.notificationOccurred?.('success');
             flashFrame('hit'); updateUI();
         } else {
             if (now - lastErrTime > 2000) {
                 lastErrTime = now; beep(false);
-                tg.HapticFeedback?.notificationOccurred('error'); flashFrame('dup');
+                tg.HapticFeedback?.notificationOccurred?.('error'); flashFrame('dup');
             }
         }
         return;
@@ -581,14 +595,14 @@ function handleDecoded({ value: text, format }) {
     if (scannedCodes.includes(text)) {
         if (now - lastErrTime > 2000) {
             lastErrTime = now; beep(false);
-            tg.HapticFeedback?.notificationOccurred('error'); flashFrame('dup');
+            tg.HapticFeedback?.notificationOccurred?.('error'); flashFrame('dup');
         }
         return;
     }
     if (now - lastScanTime < SCAN_COOLDOWN) return;
     lastScanTime = now;
     scannedCodes.unshift(text);
-    beep(true); tg.HapticFeedback?.notificationOccurred('success');
+    beep(true); tg.HapticFeedback?.notificationOccurred?.('success');
     flashFrame('hit'); updateUI();
 }
 
@@ -612,8 +626,8 @@ function updateUI() {
         sendBtn.style.display = clrBtn.style.display = 'block';
     }
 }
-window.removeCode = i => { scannedCodes.splice(i, 1); tg.HapticFeedback?.impactOccurred('light'); updateUI(); };
-window.clearAll   = () => { scannedCodes = []; tg.HapticFeedback?.impactOccurred('medium'); updateUI(); };
+window.removeCode = i => { scannedCodes.splice(i, 1); tg.HapticFeedback?.impactOccurred?.('light'); updateUI(); };
+window.clearAll   = () => { scannedCodes = []; tg.HapticFeedback?.impactOccurred?.('medium'); updateUI(); };
 
 /* ════════════════════════════════════════════════════════════
    TORCH
@@ -624,7 +638,7 @@ window.toggleTorch = async () => {
     try {
         await videoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
         document.getElementById('torch-btn').classList.toggle('torch-on', torchOn);
-        tg.HapticFeedback?.impactOccurred('light');
+        tg.HapticFeedback?.impactOccurred?.('light');
     } catch(e) { torchOn = !torchOn; }
 };
 
@@ -677,7 +691,8 @@ try {
 
 if ('BarcodeDetector' in window) {
     /* ── ENGINE 1: Native BarcodeDetector (Android / Chrome) ── */
-    statusLbl.textContent = '⚡ Native';
+    engineLabel = '⚡ Native';
+    statusLbl.textContent = engineLabel;
 
     let supported = [];
     try { supported = await BarcodeDetector.getSupportedFormats(); } catch(e) {}
@@ -698,11 +713,25 @@ if ('BarcodeDetector' in window) {
 
 } else {
     /* ── ENGINE 2: ZXing direct (iOS Safari / Desktop / fallback) ── */
-    const engine = isIOS ? '🍎 ZXing/iOS' : '🔍 ZXing';
-    statusLbl.textContent = engine;
+    engineLabel = isIOS ? '🍎 ZXing/iOS' : '🔍 ZXing';
+    statusLbl.textContent = engineLabel;
+
+    /* Guard: ZXing CDN might fail to load (network/CSP) */
+    if (typeof ZXing === 'undefined') {
+        loader.style.display = 'flex';
+        loaderTx.textContent = '❌ Не вдалося завантажити бібліотеку сканера. Перевірте інтернет.';
+        return;
+    }
 
     /* Single reader instance — NEVER recreate inside the loop */
-    const zxReader = buildZXingReader();
+    let zxReader;
+    try {
+        zxReader = buildZXingReader();
+    } catch(e) {
+        loader.style.display = 'flex';
+        loaderTx.textContent = '❌ ZXing init: ' + (e?.message || String(e));
+        return;
+    }
 
     startScanLoop(() => {
         /* Sync decode — wrapped in Promise for uniform interface */
