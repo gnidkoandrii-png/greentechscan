@@ -573,8 +573,17 @@ function handleDecoded({ value: text, format }) {
     const is2D = IS_2D.has(format) || (typeof format === 'string' && format.toLowerCase().includes('qr'));
     setFrameMode(is2D ? 'qr' : 'barcode', true);
 
-    /* Multi-serial QR (split by newline / comma / semicolon) */
-    const parts = text.split(/[\r\n,;]+/).map(s => s.trim()).filter(s => s.length >= 3);
+    /* Multi-serial QR (split by newline / comma / semicolon / pipe / tab) */
+    let parts = text.split(/[\r\n,;|\t]+/).map(s => s.trim()).filter(s => s.length >= 3);
+
+    /* Fallback: space-separated serials (e.g. "SN001 SN002 SN003").
+       Only activate if primary split gave ≤1 part AND space-split gives ≥2 parts
+       where every part has no internal spaces (i.e. each part is a single token). */
+    if (parts.length <= 1 && text.includes(' ')) {
+        const spaceParts = text.trim().split(/\s+/).filter(s => s.length >= 3);
+        if (spaceParts.length > 1) parts = spaceParts;
+    }
+
     if (parts.length > 1) {
         if (now - lastScanTime < SCAN_COOLDOWN) return;
         lastScanTime = now;
