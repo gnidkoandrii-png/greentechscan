@@ -739,11 +739,13 @@ if ('BarcodeDetector' in window) {
             try {
                 resolve(zxingDecode(zxReader));
             } catch(e) {
-                /* NotFoundException is normal (no code in frame) */
-                if (e?.name === 'NotFoundException' || e?.message?.includes('not found')) {
-                    resolve(null);
-                } else {
+                /* ZXing throws NotFoundException / ChecksumException / FormatException
+                   for every frame with no valid barcode — all are "no code, try next frame".
+                   Only native JS errors (TypeError, ReferenceError) are real bugs. */
+                if (e instanceof TypeError || e instanceof ReferenceError) {
                     reject(e);
+                } else {
+                    resolve(null);
                 }
             }
         });
